@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        .modal { display: none; }
+        .modal.show { display: flex; }
+        .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .password-container { position: relative; }
+        .password-toggle { 
+            position: absolute; 
+            right: 10px; 
+            top: 50%; 
+            transform: translateY(-50%); 
+            cursor: pointer; 
+            width: 20px; 
+            height: 20px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans">
+    <!-- Header -->
+    <header class="bg-blue-600 text-white p-4 flex justify-between items-center">
+        <h1 class="text-xl font-semibold">Admin Portal</h1>
+        <div class="flex items-center space-x-4">
+            <span class="text-sm">Welcome, {{ current_user.full_name }}</span>
+            <button id="changePasswordBtn" class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1.5 rounded text-sm">Change Password</button>
+            <a href="{{ url_for('dashboard') }}" class="bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded text-sm">Dashboard</a>
+            <a href="{{ url_for('logout') }}" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded text-sm">Logout</a>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto p-4">
+        <!-- Users Section -->
+        <section class="bg-white p-4 rounded-lg shadow mb-4">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold">Users</h2>
+                <button id="addUserBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Add User</button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="bg-gray-200">
+                            <th class="p-2 text-left">Username</th>
+                            <th class="p-2 text-left">Full Name</th>
+                            <th class="p-2 text-left">Role</th>
+                            <th class="p-2 text-left">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for user in users %}
+                        <tr class="border-b">
+                            <td class="p-2 truncate">{{ user[1] }}</td>
+                            <td class="p-2 truncate">{{ user[2] }}</td>
+                            <td class="p-2">{{ user[3] | capitalize }}</td>
+                            <td class="p-2 flex space-x-2">
+                                <button class="bg-yellow-500 hover:bg-yellow-600 text-white px-2 py-1 rounded text-xs edit-user-btn" data-id="{{ user[0] }}" data-username="{{ user[1] }}" data-fullname="{{ user[2] }}" data-role="{{ user[3] }}">Edit</button>
+                                {% if user[0] != current_user.id %}
+                                <button class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs delete-user-btn" data-id="{{ user[0] }}" data-username="{{ user[1] }}">Delete</button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" class="p-2 text-center">No users found</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <!-- Add User Modal -->
+    <div id="addUserModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+        <div class="bg-white p-3 rounded-lg w-full max-w-md">
+            <h2 class="text-base font-semibold mb-2">Add User</h2>
+            <form id="addUserForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Username</label>
+                    <input type="text" name="username" class="w-full p-1.5 border rounded text-sm" required>
+                </div>
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Full Name</label>
+                    <input type="text" name="full_name" class="w-full p-1.5 border rounded text-sm" required>
+                </div>
+                <div class="mb-2 password-container">
+                    <label class="block text-sm font-medium mb-1">Password</label>
+                    <input type="password" name="password" class="w-full p-1.5 border rounded text-sm" required>
+                    <svg class="password-toggle" data-input="password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
+                        <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle class="eye" cx="12" cy="12" r="3" />
+                        <path class="eye-slash hidden" d="M3 3l18 18" />
+                    </svg>
+                </div>
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Role</label>
+                    <select name="role" class="w-full p-1.5 border rounded text-sm" required>
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                <div class="flex justify-end">
+                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('addUserModal')">Cancel</button>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Add User</button>
+                </div>
+            </form>
+            <p id="addUserStatus" class="mt-2 text-sm"></p>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div id="editUserModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+        <div class="bg-white p-3 rounded-lg w-full max-w-md">
+            <h2 class="text-base font-semibold mb-2">Edit User</h2>
+            <form id="editUserForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="user_id" id="editUserId">
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Username</label>
+                    <input type="text" name="username" id="editUsername" class="w-full p-1.5 border rounded text-sm" required>
+                </div>
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Full Name</label>
+                    <input type="text" name="full_name" id="editFullName" class="w-full p-1.5 border rounded text-sm" required>
+                </div>
+                <div class="mb-2 password-container">
+                    <label class="block text-sm font-medium mb-1">Password (Leave blank to keep unchanged)</label>
+                    <input type="password" name="password" id="editPassword" class="w-full p-1.5 border rounded text-sm">
+                    <svg class="password-toggle" data-input="password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
+                        <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle class="eye" cx="12" cy="12" r="3" />
+                        <path class="eye-slash hidden" d="M3 3l18 18" />
+                    </svg>
+                </div>
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Role</label>
+                    <select name="role" id="editRole" class="w-full p-1.5 border rounded text-sm" required>
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                <div class="flex justify-end">
+                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('editUserModal')">Cancel</button>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Update User</button>
+                </div>
+            </form>
+            <p id="editUserStatus" class="mt-2 text-sm"></p>
+        </div>
+    </div>
+
+    <!-- Delete User Modal -->
+    <div id="deleteUserModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+        <div class="bg-white p-3 rounded-lg w-full max-w-md">
+            <h2 class="text-base font-semibold mb-2">Delete User</h2>
+            <p class="text-sm mb-2">Are you sure you want to delete user <span id="deleteUsername"></span>?</p>
+            <form id="deleteUserForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="user_id" id="deleteUserId">
+                <div class="flex justify-end">
+                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('deleteUserModal')">Cancel</button>
+                    <button type="submit" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded text-sm">Delete</button>
+                </div>
+            </form>
+            <p id="deleteUserStatus" class="mt-2 text-sm"></p>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div id="changePasswordModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+        <div class="bg-white p-3 rounded-lg w-full max-w-md">
+            <h2 class="text-base font-semibold mb-2">Change Password</h2>
+            <form id="changePasswordForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="mb-2 password-container">
+                    <label class="block text-sm font-medium mb-1">Current Password</label>
+                    <input type="password" name="current_password" class="w-full p-1.5 border rounded text-sm" required>
+                    <svg class="password-toggle" data-input="current_password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
+                        <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle class="eye" cx="12" cy="12" r="3" />
+                        <path class="eye-slash hidden" d="M3 3l18 18" />
+                    </svg>
+                </div>
+                <div class="mb-2 password-container">
+                    <label class="block text-sm font-medium mb-1">New Password</label>
+                    <input type="password" name="new_password" class="w-full p-1.5 border rounded text-sm" required>
+                    <svg class="password-toggle" data-input="new_password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
+                        <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle class="eye" cx="12" cy="12" r="3" />
+                        <path class="eye-slash hidden" d="M3 3l18 18" />
+                    </svg>
+                </div>
+                <div class="mb-2 password-container">
+                    <label class="block text-sm font-medium mb-1">Confirm New Password</label>
+                    <input type="password" name="confirm_password" class="w-full p-1.5 border rounded text-sm" required>
+                    <svg class="password-toggle" data-input="confirm_password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
+                        <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle class="eye" cx="12" cy="12" r="3" />
+                        <path class="eye-slash hidden" d="M3 3l18 18" />
+                    </svg>
+                </div>
+                <div class="flex justify-end">
+                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('changePasswordModal')">Cancel</button>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Change Password</button>
+                </div>
+            </form>
+            <p id="changePasswordStatus" class="mt-2 text-sm"></p>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script>
+        // Modal Functions
+        function openModal(modalId) {
+            $(`#${modalId}`).addClass('show');
+        }
+
+        function closeModal(modalId) {
+            $(`#${modalId}`).removeClass('show');
+            $(`#${modalId} form`)[0].reset();
+            $(`#${modalId} .text-red-600, #${modalId} .text-green-600`).text('').removeClass('text-red-600 text-green-600');
+            // Reset password visibility
+            $('.password-toggle').each(function() {
+                const input = $(`input[name="${$(this).data('input')}"]`);
+                input.attr('type', 'password');
+                $(this).find('.eye').removeClass('hidden');
+                $(this).find('.eye-slash').addClass('hidden');
+            });
+        }
+
+        // Password Toggle
+        $('.password-toggle').on('click', function() {
+            const inputName = $(this).data('input');
+            const input = $(`input[name="${inputName}"]`);
+            const isPassword = input.attr('type') === 'password';
+            input.attr('type', isPassword ? 'text' : 'password');
+            $(this).find('.eye').toggleClass('hidden', !isPassword);
+            $(this).find('.eye-slash').toggleClass('hidden', isPassword);
+        });
+
+        // Add User
+        $('#addUserBtn').on('click', () => openModal('addUserModal'));
+
+        $('#addUserForm').on('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            console.log('Submitting form with CSRF token:', formData.get('csrf_token')); // Log CSRF token
+            $.ajax({
+                url: '/add_user',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                success: function(response) {
+                    console.log('Add user response:', response);
+                    $('#addUserStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    if (response.status === 'success') {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error('Add user error:', {
+                        status: xhr.status,
+                        responseText: xhr.responseText,
+                        error: error
+                    });
+                    let errorMessage = 'Error adding user';
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        if (response.message) {
+                            errorMessage = response.message;
+                        }
+                    } catch (e) {
+                        errorMessage = xhr.responseText || 'Error adding user';
+                    }
+                    $('#addUserStatus').text(errorMessage).addClass('text-red-600');
+                }
+            });
+        });
+
+        // Edit User
+        $('.edit-user-btn').on('click', function() {
+            const userId = $(this).data('id');
+            const username = $(this).data('username');
+            const fullName = $(this).data('fullname');
+            const role = $(this).data('role');
+            $('#editUserId').val(userId);
+            $('#editUsername').val(username);
+            $('#editFullName').val(fullName);
+            $('#editRole').val(role);
+            openModal('editUserModal');
+        });
+
+        $('#editUserForm').on('submit', function(e) {
+            e.preventDefault();
+            const userId = $('#editUserId').val();
+            const formData = new FormData(this);
+            $.ajax({
+                url: `/edit_user/${userId}`,
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                success: function(response) {
+                    $('#editUserStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    if (response.status === 'success') {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    }
+                },
+                error: function(xhr) {
+                    $('#editUserStatus').text('Error updating user').addClass('text-red-600');
+                }
+            });
+        });
+
+        // Delete User
+        $('.delete-user-btn').on('click', function() {
+            const userId = $(this).data('id');
+            const username = $(this).data('username');
+            $('#deleteUserId').val(userId);
+            $('#deleteUsername').text(username);
+            openModal('deleteUserModal');
+        });
+
+        $('#deleteUserForm').on('submit', function(e) {
+            e.preventDefault();
+            const userId = $('#deleteUserId').val();
+            const formData = new FormData(this);
+            $.ajax({
+                url: `/delete_user/${userId}`,
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                success: function(response) {
+                    $('#deleteUserStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    if (response.status === 'success') {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    }
+                },
+                error: function(xhr) {
+                    $('#deleteUserStatus').text('Error deleting user').addClass('text-red-600');
+                }
+            });
+        });
+
+        // Change Password
+        $('#changePasswordBtn').on('click', () => openModal('changePasswordModal'));
+
+        $('#changePasswordForm').on('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            $.ajax({
+                url: '/change_password',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                success: function(response) {
+                    $('#changePasswordStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    if (response.status === 'success') {
+                        setTimeout(() => {
+                            closeModal('changePasswordModal');
+                        }, 1000);
+                    }
+                },
+                error: function(xhr) {
+                    $('#changePasswordStatus').text('Error changing password').addClass('text-red-600');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suppression Dashboard - International Lead Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        .modal {
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        .modal-open {
+            overflow: hidden;
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .sidebar {
+            transition: transform 0.3s ease;
+            z-index: 20;
+            top: 4rem;
+            height: calc(100vh - 4rem);
+        }
+        .sidebar-hidden {
+            transform: translateX(-100%);
+        }
+        body {
+            overflow-x: hidden;
+        }
+        @media (max-width: 767px) {
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            .sidebar-open {
+                transform: translateX(0);
+            }
+        }
+        table {
+            width: 100%;
+            table-layout: auto;
+        }
+        th, td {
+            min-width: 0;
+            white-space: normal;
+            word-break: break-word;
+            overflow-wrap: break-word;
+            hyphens: auto;
+            padding: 0.375rem 0.75rem;
+        }
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+        }
+        @media (min-width: 768px) {
+            main {
+                max-width: calc(100vw - 16rem);
+            }
+        }
+        .custom-filter {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .custom-filter input, .custom-filter select {
+            flex: 1;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans">
+    <!-- Sidebar -->
+    <div id="sidebar" class="fixed left-0 w-64 bg-white shadow-lg sidebar md:sidebar-open">
+        <div class="flex items-center justify-between p-3 border-b">
+            <h2 class="text-base font-semibold">Clients</h2>
+            <button id="sidebarToggle" class="text-gray-600 md:hidden">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="overflow-y-auto h-[calc(100%-3rem)]">
+            <ul id="clientList" class="p-2">
+                {% if clients %}
+                    {% for client in clients %}
+                        <li class="p-2 hover:bg-gray-100 cursor-pointer text-black" data-client-id="{{ client[0] }}">{{ client[1] }}</li>
+                    {% endfor %}
+                {% else %}
+                    <li class="p-2 text-gray-500">No clients available</li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+
+    <!-- Sidebar Toggler -->
+    <button id="sidebarToggler" class="fixed top-4 left-4 z-30 md:hidden bg-blue-600 text-white p-2 rounded">
+        <i class="fas fa-bars"></i>
+    </button>
+
+    <!-- Header -->
+    <header class="bg-blue-600 text-white p-3 shadow-md fixed top-0 left-0 right-0 z-10">
+        <div class="container mx-auto flex justify-between items-center max-w-full">
+            <h1 class="text-lg font-bold"></h1>
+            <div class="flex items-center space-x-2">
+                <button id="addClientBtn" class="bg-green-500 hover:bg-green-600 px-3 py-1.5 rounded text-sm">Add Client</button>
+                <a href="/admin" class="bg-green-500 hover:bg-red-600 px-3 py-1.5 rounded text-sm">Admin</a>
+                <a href="/logout" class="bg-red-500 hover:bg-red-600 px-3 py-1.5 rounded text-sm">Logout</a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto p-3 pt-16 md:pl-64 w-full box-border max-w-full overflow-x-hidden">
+        <!-- Suppression Summary -->
+        <div class="bg-white p-3 rounded-lg shadow-md mb-3 fade-in">
+            <h2 class="text-base font-semibold mb-2">Suppression Summary</h2>
+            <div id="summarySection">
+                {% if files %}
+                    {% for client_id in files | map(attribute=8) | unique %}
+                        {% set latest_suppression = files | selectattr('8', 'equalto', client_id) | max(attribute='5') %}
+                        {% if latest_suppression and latest_suppression[5] %}
+                            <div class="mb-3" data-client-id="{{ client_id }}">
+                                <h3 class="text-sm font-medium mb-1.5">Latest Suppression (#{{ latest_suppression[5] }}) for {{ latest_suppression[7] }}</h3>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                                    <div><strong>Total Phones Checked:</strong> {{ latest_suppression[11] }}</div>
+                                    <div><strong>Total Unique Phones Before Merge:</strong> {{ latest_suppression[12] }}</div>
+                                    <div><strong>Total Unique Phones After Merge:</strong> {{ latest_suppression[13] }}</div>
+                                    <div><strong>Duplicates Removed After Merge:</strong> {{ latest_suppression[14] }}</div>
+                                </div>
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                {% endif %}
+                {% if leads_files %}
+                    {% for client_id in leads_files | map(attribute=9) | unique %}
+                        {% set latest_leads = leads_files | selectattr('9', 'equalto', client_id) | max(attribute='3') %}
+                        <div class="mb-3" data-client-id="{{ client_id }}">
+                            <h3 class="text-sm font-medium mb-1.5">Latest Leads for {{ latest_leads[8] }} (Suppression #{{ latest_leads[6] }})</h3>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                                <div><strong>Total Phones in Data File:</strong> {{ latest_leads[4] }}</div>
+                                <div><strong>Unique Leads:</strong> {{ latest_leads[5] }}</div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+                {% if not files and not leads_files %}
+                    <p class="text-gray-500 text-sm">No suppressions or leads generated yet.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Client Selection -->
+        <div class="bg-white p-3 rounded-lg shadow-md mb-3">
+            <div class="flex justify-between items-center">
+                <h2 class="text-base font-semibold mb-2">Client</h2>
+                <button id="selectClientBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Select Client</button>
+            </div>
+        </div>
+
+        <!-- Datasets and Suppressions -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+            <!-- Uploaded Datasets -->
+            <div class="bg-white p-3 rounded-lg shadow-md">
+                <div class="flex justify-between items-center mb-2">
+                    <h2 class="text-base font-semibold">Uploaded Datasets</h2>
+                    <button id="uploadBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm" disabled>Upload Files</button>
+                </div>
+                <div id="datasetsTable" class="table-container">
+                    <table class="w-full text-left text-sm">
+                        <thead>
+                            <tr class="bg-gray-200">
+                                <th class="p-1.5">File Name</th>
+                                <th class="p-1.5">Upload Date</th>
+                                <th class="p-1.5">Client</th>
+                                <th class="p-1.5">Uniques</th>
+                                <th class="p-1.5">Duplicates</th>
+                                <th class="p-1.5">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="datasetsBody">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Suppressions -->
+            <div class="bg-white p-3 rounded-lg shadow-md">
+                <div class="flex justify-between items-center mb-2">
+                    <h2 class="text-base font-semibold">Suppression Results</h2>
+                </div>
+                <div id="suppressionsTable" class="table-container">
+                    <table class="w-full text-left text-sm">
+                        <thead>
+                            <tr class="bg-gray-200">
+                                <th class="p-1.5">Suppression #</th>
+                                <th class="p-1.5">File Name</th>
+                                <th class="p-1.5">Status</th>
+                                <th class="p-1.5">Client</th>
+                                <th class="p-1.5">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="suppressionsBody">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lead Generation -->
+        <div class="bg-white p-3 rounded-lg shadow-md fade-in">
+            <div class="flex justify-between items-center mb-2">
+                <h2 class="text-base font-semibold">Lead Generation</h2>
+                <div>
+                    <button id="uploadDataBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm mr-2">Upload Data</button>
+                    <button id="editDataBtn" class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1.5 rounded text-sm mr-2 {% if not data_file %}hidden{% endif %}">Edit Data</button>
+                    <button id="generateLeadsBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm" disabled>Get Leads</button>
+                </div>
+            </div>
+            <div class="mb-3">
+                {% if data_file %}
+                    <p class="text-sm"><strong>Current Data File:</strong> {{ data_file[0] }} (Uploaded: {{ data_file[1] }})</p>
+                {% else %}
+                    <p class="text-gray-500 text-sm">No data file uploaded.</p>
+                {% endif %}
+            </div>
+            <div id="leadsTable" class="table-container">
+                <table class="w-full text-left text-sm">
+                    <thead>
+                        <tr class="bg-gray-200">
+                            <th class="p-1.5">Data File</th>
+                            <th class="p-1.5">Output File</th>
+                            <th class="p-1.5">Client</th>
+                            <th class="p-1.5">Upload Date</th>
+                            <th class="p-1.5">Revenue Filter</th>
+                            <th class="p-1.5">Number Type</th>
+                            <th class="p-1.5">Email Filter</th>
+                            <th class="p-1.5">Lead Quantity</th>
+                            <th class="p-1.5">Custom Filters</th>
+                            <th class="p-1.5">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leadsBody">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- Add Client Modal -->
+    <div id="addClientModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+        <div class="bg-white p-3 rounded-lg w-full max-w-md">
+            <h2 class="text-base font-semibold mb-2">Add New Client</h2>
+            <form id="addClientForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Client Name</label>
+                    <input type="text" name="name" class="w-full p-1.5 border rounded text-sm" required>
+                </div>
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Details</label>
+                    <textarea name="details" class="w-full p-1.5 border rounded text-sm" rows="4"></textarea>
+                </div>
+                <div class="flex justify-end">
+                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('addClientModal')">Cancel</button>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Add Client</button>
+                </div>
+            </form>
+            <p id="addClientStatus" class="mt-2 text-sm"></p>
+        </div>
+    </div>
+
+    <!-- Select Client Modal -->
+    <div id="selectClientModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+        <div class="bg-white p-3 rounded-lg w-1/3 max-w-md">
+            <h2 class="text-base font-semibold mb-2">Select Client</h2>
+            <select id="clientSelect" class="w-full p-1.5 border rounded mb-2 text-sm">
+                <option value="">Select a client</option>
+                {% for client in clients %}
+                    <option value="{{ client[0] }}">{{ client[1] }}</option>
+                {% endfor %}
+            </select>
+            <div class="flex justify-end">
+                <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('selectClientModal')">Cancel</button>
+                <button id="confirmClientBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload Files Modal (Suppression) -->
+    <div id="uploadModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+        <div class="bg-white p-3 rounded-lg w-full max-w-md">
+            <h2 class="text-base font-semibold mb-2">Upload Files for Suppression</h2>
+            <form id="uploadForm" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="client_id" id="uploadClientId">
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Select Files (CSV/XLSX)</label>
+                    <input type="file" name="files" multiple accept=".csv,.xlsx" class="w-full p-1.5 border rounded text-sm">
+                </div>
+                <div class="flex justify-end">
+                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('uploadModal')">Cancel</button>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Upload</button>
+                </div>
+            </form>
+            <div id="loading" class="hidden mt-2">
+                <div class="flex items-center">
+                    <svg class="animate-spin h-5 w-5 mr-3 text-blue-500" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span class="text-sm">Processing...</span>
+                </div>
+            </div>
+            <p id="uploadStatus" class="mt-2 text-sm"></p>
+        </div>
+    </div>
+
+    <!-- Upload Data File Modal -->
+    <div id="uploadDataModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+        <div class="bg-white p-3 rounded-lg w-full max-w-md">
+            <h2 class="text-base font-semibold mb-2">Upload Data File</h2>
+            <form id="uploadDataForm" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Select Data File (CSV/XLSX)</label>
+                    <input type="file" name="file" accept=".csv,.xlsx" class="w-full p-1.5 border rounded text-sm" required>
+                </div>
+                <div class="flex justify-end">
+                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('uploadDataModal')">Cancel</button>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Upload</button>
+                </div>
+            </form>
+            <div id="uploadDataLoading" class="hidden mt-2">
+                <div class="flex items-center">
+                    <svg class="animate-spin h-5 w-5 mr-3 text-blue-500" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span class="text-sm">Processing...</span>
+                </div>
+            </div>
+            <p id="uploadDataStatus" class="mt-2 text-sm"></p>
+        </div>
+    </div>
+
+    <!-- Edit Data File Modal -->
+    <div id="editDataModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+        <div class="bg-white p-3 rounded-lg w-full max-w-md">
+            <h2 class="text-base font-semibold mb-2">Edit Data File</h2>
+            <form id="editDataForm" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Replace Data File (CSV/XLSX)</label>
+                    <input type="file" name="file" accept=".csv,.xlsx" class="w-full p-1.5 border rounded text-sm" required>
+                </div>
+                <div class="flex justify-end">
+                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('editDataModal')">Cancel</button>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Replace</button>
+                </div>
+            </form>
+            <div id="editDataLoading" class="hidden mt-2">
+                <div class="flex items-center">
+                    <svg class="animate-spin h-5 w-5 mr-3 text-blue-500" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span class="text-sm">Processing...</span>
+                </div>
+            </div>
+            <p id="editDataStatus" class="mt-2 text-sm"></p>
+        </div>
+    </div>
+
+    <!-- Generate Leads Modal -->
+    <div id="leadsModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+        <div class="bg-white p-3 rounded-lg w-full max-w-lg">
+            <h2 class="text-base font-semibold mb-2">Generate Leads</h2>
+            <form id="leadsForm" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="client_id" id="leadsClientId">
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Select Client</label>
+                    <select id="leadsClientSelect" name="client_id" class="w-full p-1.5 border rounded text-sm" required>
+                        <option value="">Select a client</option>
+                        {% for client in clients %}
+                            <option value="{{ client[0] }}">{{ client[1] }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Revenue Filter</label>
+                    <select name="revenue_filter" class="w-full p-1.5 border rounded text-sm">
+                        <option value="">None</option>
+                        <option value="full">Full Monthly Revenue</option>
+                        <option value="100k+">Revenue >= 100k</option>
+                    </select>
+                </div>
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Number Type</label>
+                    <select name="number_type_filter" class="w-full p-1.5 border rounded text-sm">
+                        <option value="">None</option>
+                        <option value="mobile">Mobile Only</option>
+                    </select>
+                </div>
+                <div class="mb-2">
+                    <label class="flex items-center text-sm font-medium">
+                        <input type="checkbox" name="email_filter" value="true" class="mr-2">
+                        Require Valid Email
+                    </label>
+                </div>
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Number of Leads</label>
+                    <input type="number" name="lead_quantity" min="1" placeholder="e.g., 2000" class="w-full p-1.5 border rounded text-sm">
+                </div>
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Custom Filters</label>
+                    <div id="custom-filters">
+                        <div class="custom-filter">
+                            <input type="text" name="custom_column" placeholder="Column (e.g., age)" class="p-1.5 border rounded text-sm">
+                            <select name="custom_condition" class="p-1.5 border rounded text-sm">
+                                <option value="==">Equals</option>
+                                <option value=">">Greater Than</option>
+                                <option value="<">Less Than</option>
+                                <option value="contains">Contains</option>
+                            </select>
+                            <input type="text" name="custom_value" placeholder="Value (e.g., 30)" class="p-1.5 border rounded text-sm">
+                            <button type="button" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="this.parentElement.remove()">Remove</button>
+                        </div>
+                    </div>
+                    <button type="button" id="addCustomFilterBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm mt-2">Add Custom Filter</button>
+                </div>
+                <input type="hidden" name="custom_filters" id="custom_filters_json">
+                <div class="flex justify-end">
+                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('leadsModal')">Cancel</button>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Generate Leads</button>
+                </div>
+            </form>
+            <div id="leadsLoading" class="hidden mt-2">
+                <div class="flex items-center">
+                    <svg class="animate-spin h-5 w-5 mr-3 text-blue-500" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span class="text-sm">Processing...</span>
+                </div>
+            </div>
+            <p id="leadsStatus" class="mt-2 text-sm"></p>
+        </div>
+    </div>
+
+    <script>
+        let filesData = {{ files | tojson }};
+        let leadsFilesData = {{ leads_files | tojson }};
+        let selectedClientId = '';
+
+        $(document).ready(function() {
+            if (typeof $ === 'undefined') {
+                console.error('jQuery not loaded');
+                return;
+            }
+
+            // Sidebar toggler
+            $('#sidebarToggler').on('click', () => {
+                $('#sidebar').toggleClass('sidebar-hidden sidebar-open');
+            });
+
+            $('#sidebarToggle').on('click', () => {
+                $('#sidebar').addClass('sidebar-hidden').removeClass('sidebar-open');
+            });
+
+            // Close sidebar when clicking outside on mobile
+            $(document).on('click', function(e) {
+                if ($(window).width() < 768 && !$(e.target).closest('#sidebar').length && !$(e.target).closest('#sidebarToggler').length) {
+                    $('#sidebar').addClass('sidebar-hidden').removeClass('sidebar-open');
+                }
+            });
+
+            // Client selection from sidebar
+            $('#clientList').on('click', 'li:not(.text-gray-500)', function() {
+                selectedClientId = $(this).data('client-id').toString();
+                $('#uploadBtn').prop('disabled', !selectedClientId);
+                $('#generateLeadsBtn').prop('disabled', !selectedClientId);
+                try {
+                    filterTables(selectedClientId);
+                } catch (e) {
+                    console.error('Error in filterTables:', e);
+                }
+                if ($(window).width() < 768) {
+                    $('#sidebar').addClass('sidebar-hidden').removeClass('sidebar-open');
+                }
+            });
+
+            // Open modals
+            $('#addClientBtn').on('click', () => openModal('addClientModal'));
+            $('#selectClientBtn').on('click', () => openModal('selectClientModal'));
+            $('#uploadBtn').on('click', () => {
+                if (selectedClientId) {
+                    $('#uploadClientId').val(selectedClientId);
+                    openModal('uploadModal');
+                }
+            });
+            $('#uploadDataBtn').on('click', () => openModal('uploadDataModal'));
+            $('#editDataBtn').on('click', () => openModal('editDataModal'));
+            $('#generateLeadsBtn').on('click', () => {
+                if (selectedClientId) {
+                    $('#leadsClientId').val(selectedClientId);
+                    $('#leadsClientSelect').val(selectedClientId);
+                    openModal('leadsModal');
+                }
+            });
+
+            // Confirm client selection from modal
+            $('#confirmClientBtn').on('click', function() {
+                const clientId = $('#clientSelect').val();
+                if (!clientId) {
+                    alert('Please select a client');
+                    return;
+                }
+                selectedClientId = clientId.toString();
+                $('#uploadBtn').prop('disabled', false);
+                $('#generateLeadsBtn').prop('disabled', false);
+                try {
+                    filterTables(selectedClientId);
+                    closeModal('selectClientModal');
+                } catch (e) {
+                    console.error('Error in confirmClientBtn:', e);
+                    alert('Error filtering tables: ' + e.message);
+                }
+            });
+
+            // Add custom filter
+            $('#addCustomFilterBtn').on('click', function() {
+                const newFilter = `
+                    <div class="custom-filter">
+                        <input type="text" name="custom_column" placeholder="Column (e.g., age)" class="p-1.5 border rounded text-sm">
+                        <select name="custom_condition" class="p-1.5 border rounded text-sm">
+                            <option value="==">Equals</option>
+                            <option value=">">Greater Than</option>
+                            <option value="<">Less Than</option>
+                            <option value="contains">Contains</option>
+                        </select>
+                        <input type="text" name="custom_value" placeholder="Value (e.g., 30)" class="p-1.5 border rounded text-sm">
+                        <button type="button" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="this.parentElement.remove()">Remove</button>
+                    </div>
+                `;
+                $('#custom-filters').append(newFilter);
+            });
+
+            // Handle leads form submission
+            $('#leadsForm').on('submit', function(e) {
+                e.preventDefault();
+                // Collect custom filters
+                const filters = [];
+                $('#custom-filters .custom-filter').each(function() {
+                    const column = $(this).find('[name="custom_column"]').val();
+                    const condition = $(this).find('[name="custom_condition"]').val();
+                    const value = $(this).find('[name="custom_value"]').val();
+                    if (column && condition && value) {
+                        filters.push({ column, condition, value });
+                    }
+                });
+                $('#custom_filters_json').val(JSON.stringify(filters));
+
+                $('#leadsLoading').removeClass('hidden');
+                $('#leadsStatus').text('').removeClass('text-red-600 text-green-600');
+                const formData = new FormData(this);
+                $.ajax({
+                    url: '/generate_leads',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                    success: function(response) {
+                        $('#leadsLoading').addClass('hidden');
+                        $('#leadsStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                        if (response.status === 'success') {
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 1000);
+                        }
+                    },
+                    error: function(xhr) {
+                        $('#leadsLoading').addClass('hidden');
+                        $('#leadsStatus').text('Error generating leads').addClass('text-red-600');
+                    }
+                });
+            });
+
+            // Add client form submission
+            $('#addClientForm').on('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                $.ajax({
+                    url: '/add_client',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                    success: function(response) {
+                        $('#addClientStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                        if (response.status === 'success') {
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 1000);
+                        }
+                    },
+                    error: function(xhr) {
+                        $('#addClientStatus').text('Error adding client').addClass('text-red-600');
+                    }
+                });
+            });
+
+            // Upload files form submission (suppression)
+            $('#uploadForm').on('submit', function(e) {
+                e.preventDefault();
+                $('#loading').removeClass('hidden');
+                $('#uploadStatus').text('').removeClass('text-red-600 text-green-600');
+                const formData = new FormData(this);
+                $.ajax({
+                    url: '/upload',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                    success: function(response) {
+                        $('#loading').addClass('hidden');
+                        $('#uploadStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                        if (response.status === 'success') {
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 1000);
+                        }
+                    },
+                    error: function(xhr) {
+                        $('#loading').addClass('hidden');
+                        $('#uploadStatus').text('Error uploading files').addClass('text-red-600');
+                    }
+                });
+            });
+
+            // Upload data file form submission
+            $('#uploadDataForm, #editDataForm').on('submit', function(e) {
+                e.preventDefault();
+                const modalId = $(this).attr('id') === 'uploadDataForm' ? 'uploadDataModal' : 'editDataModal';
+                const statusId = modalId === 'uploadDataModal' ? 'uploadDataStatus' : 'editDataStatus';
+                const loadingId = modalId === 'uploadDataModal' ? 'uploadDataLoading' : 'editDataLoading';
+                $(`#${loadingId}`).removeClass('hidden');
+                $(`#${statusId}`).text('').removeClass('text-red-600 text-green-600');
+                const formData = new FormData(this);
+                $.ajax({
+                    url: '/upload_data',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                    success: function(response) {
+                        $(`#${loadingId}`).addClass('hidden');
+                        $(`#${statusId}`).text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                        if (response.status === 'success') {
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 1000);
+                        }
+                    },
+                    error: function(xhr) {
+                        $(`#${loadingId}`).addClass('hidden');
+                        $(`#${statusId}`).text('Error uploading data file').addClass('text-red-600');
+                    }
+                });
+            });
+
+            // Initial table population
+            try {
+                filterTables('');
+            } catch (e) {
+                console.error('Initial filterTables error:', e);
+            }
+        });
+
+        function openModal(modalId) {
+            $(`#${modalId}`).removeClass('hidden').addClass('flex fade-in');
+            $('body').addClass('modal-open');
+        }
+
+        function closeModal(modalId) {
+            $(`#${modalId}`).addClass('hidden').removeClass('flex fade-in');
+            $('body').removeClass('modal-open');
+            const $form = $(`#${modalId} form`);
+            if ($form.length) {
+                $form[0].reset();
+            }
+            $(`#${modalId} p`).text('').removeClass('text-red-600 text-green-600');
+            if (modalId === 'leadsModal') {
+                $('#custom-filters').html(`
+                    <div class="custom-filter">
+                        <input type="text" name="custom_column" placeholder="Column (e.g., age)" class="p-1.5 border rounded text-sm">
+                        <select name="custom_condition" class="p-1.5 border rounded text-sm">
+                            <option value="==">Equals</option>
+                            <option value=">">Greater Than</option>
+                            <option value="<">Less Than</option>
+                            <option value="contains">Contains</option>
+                        </select>
+                        <input type="text" name="custom_value" placeholder="Value (e.g., 30)" class="p-1.5 border rounded text-sm">
+                        <button type="button" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="this.parentElement.remove()">Remove</button>
+                    </div>
+                `);
+                $('#custom_filters_json').val('');
+            }
+        }
+
+        function deleteFile(fileId) {
+            if (!confirm('Are you sure you want to delete this file?')) return;
+            $.ajax({
+                url: `/delete_file/${fileId}`,
+                type: 'POST',
+                headers: {'X-CSRF-Token': '{{ csrf_token }}'},
+                success: function(response) {
+                    if (response.status === 'success') {
+                        alert(response.message);
+                        window.location.reload();
+                    } else {
+                        alert(response.message);
+                    }
+                },
+                error: function(xhr) {
+                    alert('Error deleting file');
+                }
+            });
+        }
+
+        function filterTables(clientId) {
+            console.log('Filtering tables for clientId:', clientId);
+            const datasetsBody = $('#datasetsBody');
+            const suppressionsBody = $('#suppressionsBody');
+            const leadsBody = $('#leadsBody');
+            const summarySection = $('#summarySection');
+            datasetsBody.empty();
+            suppressionsBody.empty();
+            leadsBody.empty();
+            summarySection.empty();
+
+            // Populate suppression summary section
+            if (!clientId) {
+                const uniqueClientIds = [...new Set(filesData.map(f => f[8]))];
+                uniqueClientIds.forEach(cid => {
+                    const latest = filesData.filter(f => f[8] === cid).reduce((a, b) => a[5] > b[5] ? a : b, {});
+                    if (latest[5]) {
+                        summarySection.append(`
+                            <div class="mb-3" data-client-id="${cid}">
+                                <h3 class="text-sm font-medium mb-1.5">Latest Suppression (#${latest[5]}) for ${latest[7]}</h3>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                                    <div><strong>Total Phones Checked:</strong> ${latest[11]}</div>
+                                    <div><strong>Total Unique Phones Before Merge:</strong> ${latest[12]}</div>
+                                    <div><strong>Total Unique Phones After Merge:</strong> ${latest[13]}</div>
+                                    <div><strong>Duplicates Removed After Merge:</strong> ${latest[14]}</div>
+                                </div>
+                            </div>
+                        `);
+                    }
+                });
+                const uniqueLeadsClientIds = [...new Set(leadsFilesData.map(l => l[9]))];
+                uniqueLeadsClientIds.forEach(cid => {
+                    const latest = leadsFilesData.filter(l => l[9] === cid).reduce((a, b) => new Date(a[3]) > new Date(b[3]) ? a : b, {});
+                    summarySection.append(`
+                        <div class="mb-3" data-client-id="${cid}">
+                            <h3 class="text-sm font-medium mb-1.5">Latest Leads for ${latest[8]} (Suppression #${latest[6]})</h3>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                                <div><strong>Total Phones in Data File:</strong> ${latest[4]}</div>
+                                <div><strong>Unique Leads:</strong> ${latest[5]}</div>
+                            </div>
+                        </div>
+                    `);
+                });
+                if (!uniqueClientIds.length && !uniqueLeadsClientIds.length) {
+                    summarySection.append('<p class="text-gray-500 text-sm">No suppressions or leads generated yet.</p>');
+                }
+            } else {
+                const latest = filesData.filter(f => f[8].toString() === clientId).reduce((a, b) => a[5] > b[5] ? a : b, {});
+                if (latest[5]) {
+                    summarySection.append(`
+                        <div class="mb-3" data-client-id="${clientId}">
+                            <h3 class="text-sm font-medium mb-1.5">Latest Suppression (#${latest[5]}) for ${latest[7]}</h3>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                                <div><strong>Total Phones Checked:</strong> ${latest[11]}</div>
+                                <div><strong>Total Unique Phones Before Merge:</strong> ${latest[12]}</div>
+                                <div><strong>Total Unique Phones After Merge:</strong> ${latest[13]}</div>
+                                <div><strong>Duplicates Removed After Merge:</strong> ${latest[14]}</div>
+                            </div>
+                        </div>
+                    `);
+                }
+                const latestLeads = leadsFilesData.filter(l => l[9].toString() === clientId).reduce((a, b) => new Date(a[3]) > new Date(b[3]) ? a : b, {3: null});
+                if (latestLeads[3]) {
+                    summarySection.append(`
+                        <div class="mb-3" data-client-id="${clientId}">
+                            <h3 class="text-sm font-medium mb-1.5">Latest Leads for ${latestLeads[8]} (Suppression #${latestLeads[6]})</h3>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                                <div><strong>Total Phones in Data File:</strong> ${latestLeads[4]}</div>
+                                <div><strong>Unique Leads:</strong> ${latestLeads[5]}</div>
+                            </div>
+                        </div>
+                    `);
+                }
+                if (!latest[5] && !latestLeads[3]) {
+                    summarySection.append('<p class="text-gray-500 text-sm">No suppressions or leads generated yet.</p>');
+                }
+            }
+
+            // Populate datasets and suppressions tables
+            filesData.forEach(file => {
+                if (!clientId || file[8].toString() === clientId) {
+                    datasetsBody.append(`
+                        <tr>
+                            <td class="p-1.5">${file[1]}</td>
+                            <td class="p-1.5">${new Date(file[3]).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                            <td class="p-1.5">${file[7]}</td>
+                            <td class="p-1.5 text-green-600">${file[9]}</td>
+                            <td class="p-1.5 text-red-600">${file[10]}</td>
+                            <td class="p-1.5">
+                                <button onclick="deleteFile(${file[0]})" class="text-red-500 hover:text-red-700" title="Delete File">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `);
+
+                    if (file[2]) {
+                        const existing = suppressionsBody.find(`tr[data-suppression="${file[5]}"]`);
+                        if (!existing.length) {
+                            suppressionsBody.append(`
+                                <tr data-suppression="${file[5]}">
+                                    <td class="p-1.5">${file[5]}</td>
+                                    <td class="p-1.5">${file[2]}</td>
+                                    <td class="p-1.5">${file[4]}</td>
+                                    <td class="p-1.5">${file[7]}</td>
+                                    <td class="p-1.5">
+                                        <a href="/download/${file[2]}" class="text-blue-500 hover:underline">Download</a>
+                                    </td>
+                                </tr>
+                            `);
+                        }
+                    }
+                }
+            });
+
+            // Populate leads table
+            leadsFilesData.forEach(lead => {
+                if (!clientId || lead[9].toString() === clientId) {
+                    leadsBody.append(`
+                        <tr>
+                            <td class="p-1.5">${lead[1]}</td>
+                            <td class="p-1.5">${lead[2] || 'No leads found'}</td>
+                            <td class="p-1.5">${lead[8]}</td>
+                            <td class="p-1.5">${new Date(lead[3]).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                            <td class="p-1.5">${lead[11] || 'None'}</td>
+                            <td class="p-1.5">${lead[12] || 'None'}</td>
+                            <td class="p-1.5">${lead[13] ? 'Yes' : 'No'}</td>
+                            <td class="p-1.5">${lead[14] || 'All'}</td>
+                            <td class="p-1.5">${lead[15] || 'None'}</td>
+                            <td class="p-1.5">
+                                ${lead[2] ? `<a href="/download/${lead[2]}" class="text-blue-500 hover:underline">Download</a>` : 'N/A'}
+                            </td>
+                        </tr>
+                    `);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
