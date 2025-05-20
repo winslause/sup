@@ -322,7 +322,7 @@ def get_latest_suppression(client_id: int) -> Optional[Tuple[str, int]]:
 def get_data_file() -> Optional[Tuple[str, str]]:
     latest_data_file = DataFile.query.order_by(DataFile.upload_date.desc()).first()
     if latest_data_file:
-        return latest_file.filename, latest_file.upload_date
+        return latest_data_file.filename, latest_data_file.upload_date
     return None
 
 def generate_leads(
@@ -701,7 +701,56 @@ def dashboard():
         files = File.query.join(Client).all()
         leads_files = LeadsFile.query.join(Client).all()
     data_file = DataFile.query.order_by(DataFile.upload_date.desc()).first()
-    return render_template('dashboard.html', clients=clients, files=files, leads_files=leads_files, data_file=data_file, csrf_token=generate_csrf())
+
+    # Convert File objects to dictionaries
+    files_data = [
+        {
+            'id': f.id,
+            'client_id': f.client_id,
+            'client_name': f.client.name,  # Add client name
+            'filename': f.filename,
+            'output_filename': f.output_filename,
+            'upload_date': f.upload_date,
+            'status': f.status,
+            'suppression_number': f.suppression_number,
+            'unique_count': f.unique_count,
+            'duplicate_count': f.duplicate_count,
+            'total_phones_checked': f.total_checked,
+            'unique_phones_before': f.unique_before_merge,
+            'unique_phones_after': f.unique_after_merge,
+            'duplicates_removed': f.duplicates_removed
+        } for f in files
+    ]
+
+    # Convert LeadsFile objects to dictionaries
+    leads_files_data = [
+        {
+            'id': lf.id,
+            'client_id': lf.client_id,
+            'client_name': lf.client.name,  # Add client name
+            'data_filename': lf.data_filename,
+            'output_filename': lf.output_filename,
+            'upload_date': lf.upload_date,
+            'total_phones': lf.total_phones,
+            'unique_leads': lf.unique_leads,
+            'suppression_number': lf.suppression_number,
+            'lead_number': lf.lead_number,
+            'revenue_filter': lf.revenue_filter,
+            'number_type_filter': lf.number_type_filter,
+            'email_filter': lf.email_filter,
+            'lead_quantity': lf.lead_quantity,
+            'custom_filters': lf.custom_filters
+        } for lf in leads_files
+    ]
+
+    return render_template(
+        'dashboard.html',
+        clients=clients,
+        files=files_data,
+        leads_files=leads_files_data,
+        data_file=data_file,
+        csrf_token=generate_csrf()
+    )
 
 @app.route('/admin')
 @admin_required
