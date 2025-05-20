@@ -1,9 +1,7 @@
 from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, flash, abort
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy import func, text
+import sqlite3
 import os
 import pandas as pd
 from werkzeug.utils import secure_filename
@@ -19,11 +17,6 @@ from functools import wraps
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'your-secret-key')
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
-
-# SQLAlchemy configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'  # Change to MySQL/PostgreSQL for Hostinger
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
 csrf = CSRFProtect(app)
 
 # Flask-Login setup
@@ -41,104 +34,23 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Model Classes
-class User(db.Model, UserMixin):
-    __tablename__ = 'users'
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    full_name = db.Column(db.String(120), nullable=False)
-    password = db.Column(db.String(120), nullable=False)
-    role = db.Column(db.String(20), nullable=False)
-
-    def __init__(self, username, full_name, password, role):
+# User class for Flask-Login
+class User(UserMixin):
+    def __init__(self, id, username, full_name, role):
+        self.id = id
         self.username = username
         self.full_name = full_name
-        self.password = password
         self.role = role
 
-class Client(db.Model):
-    __tablename__ = 'clients'
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), unique=True, nullable=False)
-    details = db.Column(db.Text)
-    files = db.relationship('File', backref='client', lazy=True)
-    leads_files = db.relationship('LeadsFile', backref='client', lazy=True)
-    used_leads = db.relationship('UsedLead', backref='client', lazy=True)
-
-class File(db.Model):
-    __tablename__ = 'files'
-    id = db.Column(db.Integer, primary_key=True)
-    client_id = db.Column(db.Integer, db.ForeignKey('clients.id'), nullable=False)
-    filename = db.Column(db.String(255), nullable=False)
-    output_filename = db.Column(db.String(255))
-    upload_date = db.Column(db.String(50))
-    status = db.Column(db.String(20), default='pending')
-    suppression_number = db.Column(db.Integer)
-    unique_count = db.Column(db.Integer, default=0)
-    duplicate_count = db.Column(db.Integer, default=0)
-    total_checked = db.Column(db.Integer, default=0)
-    unique_before_merge = db.Column(db.Integer, default=0)
-    unique_after_merge = db.Column(db.Integer, default=0)
-    duplicates_removed = db.Column(db.Integer, default=0)
-
-class UsedLead(db.Model):
-    __tablename__ = 'used_leads'
-    id = db.Column(db.Integer, primary_key=True)
-    client_id = db.Column(db.Integer, db.ForeignKey('clients.id'), nullable=False)
-    phone = db.Column(db.String(20), nullable=False)
-    added_date = db.Column(db.String(50))
-    __table_args__ = (db.UniqueConstraint('client_id', 'phone', name='uix_client_phone'),)
-
-class LeadsFile(db.Model):
-    __tablename__ = 'leads_files'
-    id = db.Column(db.Integer, primary_key=True)
-    client_id = db.Column(db.Integer, db.ForeignKey('clients.id'), nullable=False)
-    data_filename = db.Column(db.String(255), nullable=False)
-    output_filename = db.Column(db.String(255))
-    upload_date = db.Column(db.String(50))
-    total_phones = db.Column(db.Integer, default=0)
-    unique_leads = db.Column(db.Integer, default=0)
-    suppression_number = db.Column(db.Integer)
-    lead_number = db.Column(db.Integer)
-    revenue_filter = db.Column(db.String(50))
-    number_type_filter = db.Column(db.String(50))
-    email_filter = db.Column(db.Boolean)
-    lead_quantity = db.Column(db.Integer)
-    custom_filters = db.Column(db.Text)
-
-class DataFile(db.Model):
-    __tablename__ = 'data_files'
-    id = db.Column(db.Integer, primary_key=True)
-    filename = db.Column(db.String(255), nullable=False)
-    upload_date = db.Column(db.String(50))
-
-# Initialize database
-def init_db():
-    with app.app_context():
-        db.create_all()
-        # Create index for used_leads
-        try:
-            db.engine.execute('CREATE INDEX IF NOT EXISTS idx_used_leads_phone ON used_leads (client_id, phone)')
-        except Exception as e:
-            logger.warning(f"Index creation skipped: {str(e)}")
-        # Insert default admin user if none exists
-        if not User.query.filter_by(role='admin').first():
-            default_password = bcrypt.hashpw('admin123'.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-            admin = User(
-                username='admin',
-                full_name='Administrator',
-                password=default_password,
-                role='admin'
-            )
-            db.session.add(admin)
-            db.session.commit()
-
-init_db()
-
-# Flask-Login user loader
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        c.execute('SELECT id, username, full_name, role FROM users WHERE id = ?', (user_id,))
+        user = c.fetchone()
+        if user:
+            return User(user[0], user[1], user[2], user[3])
+        return None
 
 # Admin required decorator
 def admin_required(f):
@@ -147,7 +59,7 @@ def admin_required(f):
         if not current_user.is_authenticated:
             return redirect(url_for('login', next=request.url))
         if current_user.role != 'admin':
-            abort(403)
+            abort(403)  # Forbidden for non-admin users
         return f(*args, **kwargs)
     return decorated_function
 
@@ -155,6 +67,85 @@ def admin_required(f):
 @app.errorhandler(413)
 def request_entity_too_large(error):
     return jsonify({'status': 'error', 'message': 'File too large. Maximum size allowed is 100MB.'}), 413
+
+# Database setup
+def init_db():
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        # Users table (for authentication)
+        c.execute('''CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            full_name TEXT NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('admin', 'user'))
+        )''')
+        # Clients table (for client entities)
+        c.execute('''CREATE TABLE IF NOT EXISTS clients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            details TEXT
+        )''')
+        # Files table (suppressions, linked to clients)
+        c.execute('''CREATE TABLE IF NOT EXISTS files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER,
+            filename TEXT NOT NULL,
+            output_filename TEXT,
+            upload_date TEXT,
+            status TEXT DEFAULT 'pending',
+            suppression_number INTEGER,
+            unique_count INTEGER DEFAULT 0,
+            duplicate_count INTEGER DEFAULT 0,
+            total_checked INTEGER DEFAULT 0,
+            unique_before_merge INTEGER DEFAULT 0,
+            unique_after_merge INTEGER DEFAULT 0,
+            duplicates_removed INTEGER DEFAULT 0,
+            FOREIGN KEY (client_id) REFERENCES clients (id)
+        )''')
+        # Used leads table (linked to clients)
+        c.execute('''CREATE TABLE IF NOT EXISTS used_leads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER,
+            phone TEXT NOT NULL,
+            added_date TEXT,
+            UNIQUE(client_id, phone),
+            FOREIGN KEY (client_id) REFERENCES clients (id)
+        )''')
+        # Leads files table (linked to clients)
+        c.execute('''CREATE TABLE IF NOT EXISTS leads_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER,
+            data_filename TEXT NOT NULL,
+            output_filename TEXT,
+            upload_date TEXT,
+            total_phones INTEGER DEFAULT 0,
+            unique_leads INTEGER DEFAULT 0,
+            suppression_number INTEGER,
+            lead_number INTEGER,
+            revenue_filter TEXT,
+            number_type_filter TEXT,
+            email_filter BOOLEAN,
+            lead_quantity INTEGER,
+            custom_filters TEXT,
+            FOREIGN KEY (client_id) REFERENCES clients (id)
+        )''')
+        # Data files table (unchanged)
+        c.execute('''CREATE TABLE IF NOT EXISTS data_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            upload_date TEXT
+        )''')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_used_leads_phone ON used_leads (client_id, phone)')
+        # Insert a default admin user if none exists
+        c.execute('SELECT COUNT(*) FROM users WHERE role = "admin"')
+        if c.fetchone()[0] == 0:
+            default_password = bcrypt.hashpw('admin123'.encode('utf-8'), bcrypt.gensalt())
+            c.execute('INSERT INTO users (username, full_name, password, role) VALUES (?, ?, ?, ?)',
+                      ('admin', 'Administrator', default_password.decode('utf-8'), 'admin'))
+        conn.commit()
+
+init_db()
 
 # Input validation
 def validate_password(password: str) -> bool:
@@ -174,18 +165,17 @@ def number_to_ordinal(n: int) -> str:
 
 def batch_insert_unique_phones(client_id: int, unique_phones: List[str]):
     batch_size = 10000
-    current_time = datetime.datetime.now().isoformat()
-    for i in range(0, len(unique_phones), batch_size):
-        batch = unique_phones[i:i + batch_size]
-        for phone in batch:
-            try:
-                lead = UsedLead(client_id=client_id, phone=phone, added_date=current_time)
-                db.session.add(lead)
-            except IntegrityError:
-                db.session.rollback()
-                continue
-        db.session.commit()
-        logger.info(f"Inserted batch of {len(batch)} phones for client {client_id}")
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        current_time = datetime.datetime.now().isoformat()
+        for i in range(0, len(unique_phones), batch_size):
+            batch = unique_phones[i:i + batch_size]
+            c.executemany(
+                'INSERT OR IGNORE INTO used_leads (client_id, phone, added_date) VALUES (?, ?, ?)',
+                [(client_id, phone, current_time) for phone in batch]
+            )
+            conn.commit()
+            logger.info(f"Inserted batch of {len(batch)} phones for client {client_id}")
 
 def suppress_leads(input_dfs: List[pd.DataFrame], used_numbers: Set[str], suppression_number: int) -> Tuple[Optional[pd.DataFrame], str, List[Dict[str, int]], Dict[str, int]]:
     try:
@@ -284,46 +274,61 @@ def suppress_leads(input_dfs: List[pd.DataFrame], used_numbers: Set[str], suppre
         return None, 'failed', file_metrics, {'total_checked': total_checked}
 
 def get_suppression_number(client_id: int) -> int:
-    max_number = db.session.query(func.max(File.suppression_number)).filter_by(client_id=client_id).scalar()
-    return (max_number or 0) + 1
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        c.execute('SELECT MAX(suppression_number) FROM files WHERE client_id = ?', (client_id,))
+        max_number = c.fetchone()[0]
+        return (max_number or 0) + 1
 
 def get_lead_number(client_id: int) -> int:
-    max_number = db.session.query(func.max(LeadsFile.lead_number)).filter_by(client_id=client_id).scalar()
-    return (max_number or 0) + 1
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        c.execute('SELECT MAX(lead_number) FROM leads_files WHERE client_id = ?', (client_id,))
+        max_number = c.fetchone()[0]
+        return (max_number or 0) + 1
 
 def get_previous_suppression_numbers(client_id: int) -> Set[str]:
     used_numbers = set()
-    files = File.query.filter_by(client_id=client_id, status='completed').all()
-    for file in files:
-        output_path = os.path.join(app.config['UPLOAD_FOLDER'], file.output_filename)
-        if os.path.exists(output_path):
-            try:
-                if file.output_filename.endswith('.csv'):
-                    df = pd.read_csv(output_path, usecols=['phone', 'status'])
-                else:
-                    df = pd.read_excel(output_path, engine='openpyxl', usecols=['phone', 'status'])
-                if 'phone' in df.columns:
-                    unique_phones = df[df['status'] == 'unique']['phone'].apply(
-                        lambda x: re.sub(r'\D', '', str(x)).strip()
-                    ).tolist()
-                    used_numbers.update(unique_phones)
-                    logger.info(f"Loaded {len(unique_phones)} unique phones from {file.output_filename}")
-            except Exception as e:
-                logger.error(f"Error reading previous suppression file {file.output_filename}: {str(e)}")
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        c.execute('SELECT output_filename FROM files WHERE client_id = ? AND status = "completed"', (client_id,))
+        previous_files = c.fetchall()
+        for file in previous_files:
+            output_path = os.path.join(app.config['UPLOAD_FOLDER'], file[0])
+            if os.path.exists(output_path):
+                try:
+                    if file[0].endswith('.csv'):
+                        df = pd.read_csv(output_path, usecols=['phone', 'status'])
+                    else:
+                        df = pd.read_excel(output_path, engine='openpyxl', usecols=['phone', 'status'])
+                    if 'phone' in df.columns:
+                        unique_phones = df[df['status'] == 'unique']['phone'].apply(
+                            lambda x: re.sub(r'\D', '', str(x)).strip()
+                        ).tolist()
+                        used_numbers.update(unique_phones)
+                        logger.info(f"Loaded {len(unique_phones)} unique phones from {file[0]}")
+                except Exception as e:
+                    logger.error(f"Error reading previous suppression file {file[0]}: {str(e)}")
     logger.info(f"Total prior unique phones for client {client_id}: {len(used_numbers)}")
     return used_numbers
 
 def get_latest_suppression(client_id: int) -> Optional[Tuple[str, int]]:
-    latest_file = File.query.filter_by(client_id=client_id, status='completed').order_by(File.suppression_number.desc()).first()
-    if latest_file:
-        return latest_file.output_filename, latest_file.suppression_number
-    return None
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        c.execute('SELECT output_filename, suppression_number FROM files WHERE client_id = ? AND status = "completed" ORDER BY suppression_number DESC LIMIT 1', (client_id,))
+        result = c.fetchone()
+        if result:
+            return result[0], result[1]
+        return None
 
 def get_data_file() -> Optional[Tuple[str, str]]:
-    latest_data_file = DataFile.query.order_by(DataFile.upload_date.desc()).first()
-    if latest_data_file:
-        return latest_file.filename, latest_file.upload_date
-    return None
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        c.execute('SELECT filename, upload_date FROM data_files ORDER BY upload_date DESC LIMIT 1')
+        result = c.fetchone()
+        if result:
+            return result[0], result[1]
+        return None
 
 def generate_leads(
     data_file_path: str,
@@ -341,11 +346,11 @@ def generate_leads(
         
         # Determine columns to load based on filters
         if no_filters:
-            usecols = None
-            output_columns = None
+            usecols = None  # Load all columns when no filters are applied
+            output_columns = None  # Retain all columns in output
         else:
             usecols = ['Phone', 'Mobile']
-            output_columns = [col for col in usecols]
+            output_columns = [col for col in usecols]  # Start with phone column
             if revenue_filter:
                 usecols.append('Revenue')
                 output_columns.append('Revenue')
@@ -495,8 +500,10 @@ def generate_leads(
 
         # Select output columns
         if not no_filters and output_columns:
+            # Ensure phone_col is included in output
             if phone_col not in output_columns:
                 output_columns.append(phone_col)
+            # Filter columns, keeping only those that exist in leads_df
             output_columns = [col for col in output_columns if col in leads_df.columns]
             leads_df = leads_df[output_columns]
             logger.info(f"Output columns with filters: {output_columns}")
@@ -512,7 +519,7 @@ def generate_leads(
         columns_to_drop = ['cleaned_phone', 'is_valid', 'is_lead']
         leads_df = leads_df.drop(columns=[col for col in columns_to_drop if col in leads_df.columns], errors='ignore')
 
-        # Save output
+        # Save output (use CSV for large datasets)
         max_excel_rows = 1048576
         if len(leads_df) > max_excel_rows:
             output_filename = f"lead{lead_number}_{client_name}.csv"
@@ -575,11 +582,13 @@ def process_suppression(file_paths: List[str], client_id: int, suppression_numbe
             logger.error(f"Suppression {suppression_number} failed: No valid output generated")
             return None, 'failed', file_metrics, summary_metrics
 
+        # Validate output_df
         logger.info(f"Output DataFrame has {len(output_df)} rows and columns: {output_df.columns.tolist()}")
         if not all(col in output_df.columns for col in ['phone', 'status']):
             logger.error(f"Suppression {suppression_number} failed: Output DataFrame missing required columns")
             return None, 'failed', file_metrics, summary_metrics
 
+        # Determine output format based on row count
         max_excel_rows = 1048576
         output_filename = f"{number_to_ordinal(suppression_number)}_suppression"
         output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
@@ -600,6 +609,7 @@ def process_suppression(file_paths: List[str], client_id: int, suppression_numbe
                     chunk.to_excel(writer, index=False, sheet_name=sheet_name)
                     logger.info(f"Wrote sheet {sheet_name} with {len(chunk)} rows to {output_filename}")
 
+        # Verify output file exists
         if not os.path.exists(output_path):
             logger.error(f"Suppression {suppression_number} failed: Output file {output_filename} was not created")
             return None, 'failed', file_metrics, summary_metrics
@@ -635,22 +645,26 @@ def login():
         username = sanitize_input(request.form.get('username', ''))
         password = request.form.get('password', '')
         logger.info(f"Login attempt for username: {username}")
-        user = User.query.filter_by(username=username).first()
-        if user:
-            stored_password = user.password if isinstance(user.password, bytes) else user.password.encode('utf-8')
-            if bcrypt.checkpw(password.encode('utf-8'), stored_password):
-                login_user(user)
-                logger.info(f"Login successful for username: {username}, role: {user.role}")
-                flash('Login successful!', 'success')
-                if user.role == 'admin':
-                    return redirect(url_for('admin_portal'))
-                return redirect(url_for('dashboard'))
+        with sqlite3.connect('database.db') as conn:
+            c = conn.cursor()
+            c.execute('SELECT id, username, full_name, password, role FROM users WHERE username = ?', (username,))
+            user = c.fetchone()
+            if user:
+                stored_password = user[3] if isinstance(user[3], bytes) else user[3].encode('utf-8')
+                if bcrypt.checkpw(password.encode('utf-8'), stored_password):
+                    user_obj = User(user[0], user[1], user[2], user[4])
+                    login_user(user_obj)
+                    logger.info(f"Login successful for username: {username}, role: {user[4]}")
+                    flash('Login successful!', 'success')
+                    if user[4] == 'admin':
+                        return redirect(url_for('admin_portal'))
+                    return redirect(url_for('dashboard'))
+                else:
+                    logger.warning(f"Invalid password for username: {username}")
+                    flash('Invalid username or password', 'error')
             else:
-                logger.warning(f"Invalid password for username: {username}")
+                logger.warning(f"Username not found: {username}")
                 flash('Invalid username or password', 'error')
-        else:
-            logger.warning(f"Username not found: {username}")
-            flash('Invalid username or password', 'error')
         return redirect(url_for('login'))
     return render_template('login.html', csrf_token=generate_csrf())
 
@@ -678,14 +692,17 @@ def change_password():
     if not validate_password(new_password):
         return jsonify({'status': 'error', 'message': 'Password must be at least 8 characters long and contain letters, numbers, or special characters'}), 400
 
-    user = User.query.get(current_user.id)
-    stored_password = user.password if isinstance(user.password, bytes) else user.password.encode('utf-8')
-    if not bcrypt.checkpw(current_password.encode('utf-8'), stored_password):
-        return jsonify({'status': 'error', 'message': 'Current password is incorrect'}), 400
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        c.execute('SELECT password FROM users WHERE id = ?', (current_user.id,))
+        user = c.fetchone()
+        stored_password = user[0] if isinstance(user[0], bytes) else user[0].encode('utf-8')
+        if not user or not bcrypt.checkpw(current_password.encode('utf-8'), stored_password):
+            return jsonify({'status': 'error', 'message': 'Current password is incorrect'}), 400
 
-    hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
-    user.password = hashed_password
-    db.session.commit()
+        hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
+        c.execute('UPDATE users SET password = ? WHERE id = ?', (hashed_password, current_user.id))
+        conn.commit()
 
     logger.info(f"Password changed successfully for user: {current_user.username}")
     return jsonify({'status': 'success', 'message': 'Password changed successfully'})
@@ -693,27 +710,50 @@ def change_password():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    clients = Client.query.all()
-    if current_user.role == 'admin':
-        files = File.query.join(Client).all()
-        leads_files = LeadsFile.query.join(Client).all()
-    else:
-        files = File.query.join(Client).all()
-        leads_files = LeadsFile.query.join(Client).all()
-    data_file = DataFile.query.order_by(DataFile.upload_date.desc()).first()
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        # Fetch all clients
+        c.execute('SELECT id, name, details FROM clients')
+        clients = c.fetchall()
+        if current_user.role == 'admin':
+            # Admins see all files and leads
+            c.execute('SELECT f.id, f.filename, f.output_filename, f.upload_date, f.status, f.suppression_number, c.name, c.details, f.client_id, f.unique_count, f.duplicate_count, '
+                      'f.total_checked, f.unique_before_merge, f.unique_after_merge, f.duplicates_removed '
+                      'FROM files f JOIN clients c ON f.client_id = c.id')
+            files = c.fetchall()
+            c.execute('SELECT l.id, l.data_filename, l.output_filename, l.upload_date, l.total_phones, l.unique_leads, l.suppression_number, c.name, c.details, l.client_id, l.lead_number, '
+                      'l.revenue_filter, l.number_type_filter, l.email_filter, l.lead_quantity, l.custom_filters '
+                      'FROM leads_files l JOIN clients c ON l.client_id = c.id')
+            leads_files = c.fetchall()
+        else:
+            # Regular users see files/leads for clients they are authorized to access
+            # For simplicity, assume users can access all clients (modify if you have a user-client mapping)
+            c.execute('SELECT f.id, f.filename, f.output_filename, f.upload_date, f.status, f.suppression_number, c.name, c.details, f.client_id, f.unique_count, f.duplicate_count, '
+                      'f.total_checked, f.unique_before_merge, f.unique_after_merge, f.duplicates_removed '
+                      'FROM files f JOIN clients c ON f.client_id = c.id')
+            files = c.fetchall()
+            c.execute('SELECT l.id, l.data_filename, l.output_filename, l.upload_date, l.total_phones, l.unique_leads, l.suppression_number, c.name, c.details, l.client_id, l.lead_number, '
+                      'l.revenue_filter, l.number_type_filter, l.email_filter, l.lead_quantity, l.custom_filters '
+                      'FROM leads_files l JOIN clients c ON l.client_id = c.id')
+            leads_files = c.fetchall()
+        c.execute('SELECT filename, upload_date FROM data_files ORDER BY upload_date DESC LIMIT 1')
+        data_file = c.fetchone()
     return render_template('dashboard.html', clients=clients, files=files, leads_files=leads_files, data_file=data_file, csrf_token=generate_csrf())
 
 @app.route('/admin')
 @admin_required
 def admin_portal():
-    users = User.query.all()
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        c.execute('SELECT id, username, full_name, role FROM users')
+        users = c.fetchall()
     return render_template('admin.html', users=users, csrf_token=generate_csrf())
 
 @app.route('/add_user', methods=['POST'])
 @admin_required
 def add_user():
     try:
-        logger.info(f"Received add_user request with form data: {request.form}")
+        logger.info(f"Received add_user request with form data: {request.form}, CSRF token: {request.form.get('csrf_token')}")
         username = sanitize_input(request.form.get('username', ''))
         full_name = sanitize_input(request.form.get('full_name', ''))
         password = request.form.get('password', '')
@@ -731,32 +771,29 @@ def add_user():
             logger.warning("Password validation failed")
             return jsonify({'status': 'error', 'message': 'Password must be at least 8 characters long and contain letters, numbers, or special characters'}), 400
 
-        if User.query.filter_by(username=username).first():
-            logger.warning(f"Username already exists: {username}")
-            return jsonify({'status': 'error', 'message': 'Username already exists'}), 400
+        with sqlite3.connect('database.db') as conn:
+            c = conn.cursor()
+            c.execute('SELECT username FROM users WHERE username = ?', (username,))
+            if c.fetchone():
+                logger.warning(f"Username already exists: {username}")
+                return jsonify({'status': 'error', 'message': 'Username already exists'}), 400
 
-        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-        new_user = User(
-            username=username,
-            full_name=full_name,
-            password=hashed_password,
-            role=role
-        )
-        db.session.add(new_user)
-        db.session.commit()
+            hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+            c.execute('INSERT INTO users (username, full_name, password, role) VALUES (?, ?, ?, ?)',
+                      (username, full_name, hashed_password, role))
+            conn.commit()
 
         logger.info(f"User {username} added successfully")
         return jsonify({'status': 'success', 'message': 'User added successfully'})
     except Exception as e:
         logger.error(f"Error in add_user: {str(e)}")
-        db.session.rollback()
         return jsonify({'status': 'error', 'message': 'Server error occurred'}), 500
 
 @app.route('/add_client', methods=['POST'])
 @login_required
 def add_client():
     try:
-        logger.info(f"Received add_client request with form data: {request.form}")
+        logger.info(f"Received add_client request with form data: {request.form}, CSRF token: {request.form.get('csrf_token')}")
         name = sanitize_input(request.form.get('name', ''))
         details = request.form.get('details', '')
 
@@ -764,19 +801,20 @@ def add_client():
             logger.warning("Missing required field: name")
             return jsonify({'status': 'error', 'message': 'Client name is required'}), 400
 
-        if Client.query.filter_by(name=name).first():
-            logger.warning(f"Client name already exists: {name}")
-            return jsonify({'status': 'error', 'message': 'Client name already exists'}), 400
+        with sqlite3.connect('database.db') as conn:
+            c = conn.cursor()
+            c.execute('SELECT name FROM clients WHERE name = ?', (name,))
+            if c.fetchone():
+                logger.warning(f"Client name already exists: {name}")
+                return jsonify({'status': 'error', 'message': 'Client name already exists'}), 400
 
-        new_client = Client(name=name, details=details)
-        db.session.add(new_client)
-        db.session.commit()
+            c.execute('INSERT INTO clients (name, details) VALUES (?, ?)', (name, details))
+            conn.commit()
 
         logger.info(f"Client {name} added successfully by user {current_user.username}")
         return jsonify({'status': 'success', 'message': 'Client added successfully'})
     except Exception as e:
         logger.error(f"Error in add_client: {str(e)}")
-        db.session.rollback()
         return jsonify({'status': 'error', 'message': 'Server error occurred'}), 500
 
 @app.route('/edit_user/<int:user_id>', methods=['POST'])
@@ -800,26 +838,21 @@ def edit_user(user_id):
         return jsonify({'status': 'error', 'message': 'Password must be at least 8 characters long and contain letters, numbers, or special characters'}), 400
 
     try:
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({'status': 'error', 'message': 'User not found'}), 404
-
-        user.username = username
-        user.full_name = full_name
-        user.role = role
-        if password:
-            user.password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-        db.session.commit()
+        with sqlite3.connect('database.db') as conn:
+            c = conn.cursor()
+            if password:
+                hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+                c.execute('UPDATE users SET username = ?, full_name = ?, password = ?, role = ? WHERE id = ?',
+                          (username, full_name, hashed_password, role, user_id))
+            else:
+                c.execute('UPDATE users SET username = ?, full_name = ?, role = ? WHERE id = ?',
+                          (username, full_name, role, user_id))
+            conn.commit()
         logger.info(f"User ID {user_id} updated successfully")
         return jsonify({'status': 'success', 'message': 'User updated successfully'})
-    except IntegrityError:
+    except sqlite3.IntegrityError:
         logger.warning(f"Username already exists during edit: {username}")
-        db.session.rollback()
         return jsonify({'status': 'error', 'message': 'Username already exists'}), 400
-    except Exception as e:
-        logger.error(f"Error updating user {user_id}: {str(e)}")
-        db.session.rollback()
-        return jsonify({'status': 'error', 'message': 'Server error occurred'}), 500
 
 @app.route('/delete_user/<int:user_id>', methods=['POST'])
 @login_required
@@ -829,16 +862,16 @@ def delete_user(user_id):
     if user_id == current_user.id:
         return jsonify({'status': 'error', 'message': 'Cannot delete yourself'}), 400
     try:
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({'status': 'error', 'message': 'User not found'}), 404
-        db.session.delete(user)
-        db.session.commit()
+        with sqlite3.connect('database.db') as conn:
+            c = conn.cursor()
+            c.execute('DELETE FROM users WHERE id = ?', (user_id,))
+            if c.rowcount == 0:
+                return jsonify({'status': 'error', 'message': 'User not found'}), 404
+            conn.commit()
         logger.info(f"User ID {user_id} deleted successfully")
         return jsonify({'status': 'success', 'message': 'User deleted successfully'})
     except Exception as e:
         logger.error(f"Error deleting user {user_id}: {str(e)}")
-        db.session.rollback()
         return jsonify({'status': 'error', 'message': 'Error deleting user'}), 500
 
 @app.route('/upload', methods=['POST'])
@@ -848,9 +881,12 @@ def upload():
     if not client_id:
         return jsonify({'status': 'error', 'message': 'Client ID is required'}), 400
 
-    client = Client.query.get(client_id)
-    if not client:
-        return jsonify({'status': 'error', 'message': 'Client not found'}), 404
+    # Verify client exists
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        c.execute('SELECT id FROM clients WHERE id = ?', (client_id,))
+        if not c.fetchone():
+            return jsonify({'status': 'error', 'message': 'Client not found'}), 404
 
     files = request.files.getlist('files')
     if not files:
@@ -878,24 +914,21 @@ def upload():
     output_filename, status, file_metrics, summary_metrics = process_suppression(file_paths, int(client_id), suppression_number)
 
     if status == 'completed' and output_filename:
-        for filename in filenames:
-            new_file = File(
-                client_id=client_id,
-                filename=filename,
-                output_filename=output_filename,
-                upload_date=datetime.datetime.now().isoformat(),
-                status=status,
-                suppression_number=suppression_number,
-                unique_count=file_metrics[0]['unique_count'] if file_metrics else 0,
-                duplicate_count=file_metrics[0]['duplicate_count'] if file_metrics else 0,
-                total_checked=summary_metrics.get('total_checked', 0),
-                unique_before_merge=summary_metrics.get('unique_before_merge', 0),
-                unique_after_merge=summary_metrics.get('unique_after_merge', 0),
-                duplicates_removed=summary_metrics.get('duplicates_removed', 0)
-            )
-            db.session.add(new_file)
-        db.session.commit()
-        logger.info(f"Stored {len(filenames)} files in database for suppression {suppression_number} for client {client_id}")
+        with sqlite3.connect('database.db') as conn:
+            c = conn.cursor()
+            for filename in filenames:
+                c.execute('INSERT INTO files (client_id, filename, upload_date, status, suppression_number, output_filename, '
+                          'unique_count, duplicate_count, total_checked, unique_before_merge, unique_after_merge, duplicates_removed) '
+                          'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                          (client_id, filename, datetime.datetime.now().isoformat(), status, suppression_number, output_filename,
+                           file_metrics[0]['unique_count'] if file_metrics else 0,
+                           file_metrics[0]['duplicate_count'] if file_metrics else 0,
+                           summary_metrics.get('total_checked', 0),
+                           summary_metrics.get('unique_before_merge', 0),
+                           summary_metrics.get('unique_after_merge', 0),
+                           summary_metrics.get('duplicates_removed', 0)))
+            conn.commit()
+            logger.info(f"Stored {len(filenames)} files in database for suppression {suppression_number} for client {client_id}")
 
         return jsonify({
             'status': 'success',
@@ -924,11 +957,13 @@ def upload_data():
     file.save(file_path)
     logger.info(f"Uploaded data file: {filename}")
 
-    DataFile.query.delete()
-    new_data_file = DataFile(filename=filename, upload_date=datetime.datetime.now().isoformat())
-    db.session.add(new_data_file)
-    db.session.commit()
-    logger.info(f"Stored data file: {filename}")
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        c.execute('DELETE FROM data_files')
+        c.execute('INSERT INTO data_files (filename, upload_date) VALUES (?, ?)',
+                  (filename, datetime.datetime.now().isoformat()))
+        conn.commit()
+        logger.info(f"Stored data file: {filename}")
 
     return jsonify({'status': 'success', 'message': 'Data file uploaded successfully'})
 
@@ -939,10 +974,13 @@ def generate_leads_route():
     if not client_id:
         return jsonify({'status': 'error', 'message': 'Client ID is required'}), 400
 
-    client = Client.query.get(client_id)
-    if not client:
-        return jsonify({'status': 'error', 'message': 'Client not found'}), 404
-    client_name = client.name
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        c.execute('SELECT name FROM clients WHERE id = ?', (client_id,))
+        client = c.fetchone()
+        if not client:
+            return jsonify({'status': 'error', 'message': 'Client not found'}), 404
+        client_name = client[0]
 
     data_file = get_data_file()
     if not data_file:
@@ -965,23 +1003,16 @@ def generate_leads_route():
     )
 
     if status == 'completed':
-        new_leads_file = LeadsFile(
-            client_id=client_id,
-            data_filename=data_filename,
-            output_filename=output_filename,
-            upload_date=datetime.datetime.now().isoformat(),
-            total_phones=metrics['total_phones'],
-            unique_leads=metrics['unique_leads'],
-            suppression_number=metrics['suppression_number'],
-            lead_number=metrics['lead_number'],
-            revenue_filter=revenue_filter,
-            number_type_filter=number_type_filter,
-            email_filter=email_filter,
-            lead_quantity=lead_quantity,
-            custom_filters=metrics['custom_filters']
-        )
-        db.session.add(new_leads_file)
-        db.session.commit()
+        with sqlite3.connect('database.db') as conn:
+            c = conn.cursor()
+            c.execute('INSERT INTO leads_files (client_id, data_filename, output_filename, upload_date, total_phones, unique_leads, '
+                      'suppression_number, lead_number, revenue_filter, number_type_filter, email_filter, lead_quantity, custom_filters) '
+                      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                      (client_id, data_filename, output_filename, datetime.datetime.now().isoformat(),
+                       metrics['total_phones'], metrics['unique_leads'], metrics['suppression_number'],
+                       metrics['lead_number'], revenue_filter, number_type_filter, email_filter, lead_quantity,
+                       metrics['custom_filters']))
+            conn.commit()
         logger.info(f"Leads generated successfully for client: {client_name}, output: {output_filename}")
         return jsonify({
             'status': 'success',
@@ -996,41 +1027,44 @@ def generate_leads_route():
 @app.route('/download/<filename>')
 @login_required
 def download(filename):
-    file = File.query.filter_by(output_filename=filename).first()
-    leads_file = LeadsFile.query.filter_by(output_filename=filename).first() if not file else None
-    data_file = DataFile.query.filter_by(filename=filename).first() if not file and not leads_file else None
-    if file or leads_file or data_file:
-        client_id = file.client_id if file else leads_file.client_id if leads_file else None
-        if current_user.role == 'admin' or client_id is None:
+    with sqlite3.connect('database.db') as conn:
+        c = conn.cursor()
+        c.execute('SELECT output_filename, client_id FROM files WHERE output_filename = ? UNION '
+                  'SELECT output_filename, client_id FROM leads_files WHERE output_filename = ? UNION '
+                  'SELECT filename, NULL FROM data_files WHERE filename = ?', (filename, filename, filename))
+        file = c.fetchone()
+        if file and (current_user.role == 'admin' or file[1] is None):
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             if os.path.exists(file_path):
                 logger.info(f"User {current_user.username} downloaded file: {filename}")
                 return send_file(file_path, as_attachment=True)
-    logger.warning(f"File download failed for user {current_user.username}: {filename} not found or access denied")
-    return jsonify({'status': 'error', 'message': 'File not found or access denied'}), 404
+        logger.warning(f"File download failed for user {current_user.username}: {filename} not found or access denied")
+        return jsonify({'status': 'error', 'message': 'File not found or access denied'}), 404
 
 @app.route('/delete_file/<int:file_id>', methods=['POST'])
 @login_required
 def delete_file(file_id):
     try:
-        file = File.query.get(file_id)
-        if not file:
-            logger.warning(f"File ID {file_id} not found for deletion by user {current_user.username}")
-            return jsonify({'status': 'error', 'message': 'File not found'}), 404
-        if current_user.role != 'admin':
-            logger.warning(f"Access denied for user {current_user.username} to delete file ID {file_id}")
-            return jsonify({'status': 'error', 'message': 'Access denied'}), 403
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-        db.session.delete(file)
-        db.session.commit()
-        logger.info(f"Deleted file with id {file_id}: {file.filename} by user {current_user.username}")
+        with sqlite3.connect('database.db') as conn:
+            c = conn.cursor()
+            c.execute('SELECT filename, client_id FROM files WHERE id = ?', (file_id,))
+            file = c.fetchone()
+            if not file:
+                logger.warning(f"File ID {file_id} not found for deletion by user {current_user.username}")
+                return jsonify({'status': 'error', 'message': 'File not found'}), 404
+            if current_user.role != 'admin':
+                logger.warning(f"Access denied for user {current_user.username} to delete file ID {file_id}")
+                return jsonify({'status': 'error', 'message': 'Access denied'}), 403
+            c.execute('DELETE FROM files WHERE id = ?', (file_id,))
+            conn.commit()
+            logger.info(f"Deleted file with id {file_id}: {file[0]} by user {current_user.username}")
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file[0])
         if os.path.exists(file_path):
             os.remove(file_path)
-            logger.info(f"Removed file from storage: {file.filename}")
+            logger.info(f"Removed file from storage: {file[0]}")
         return jsonify({'status': 'success', 'message': 'File deleted successfully'})
     except Exception as e:
         logger.error(f"Error deleting file {file_id} by user {current_user.username}: {str(e)}")
-        db.session.rollback()
         return jsonify({'status': 'error', 'message': 'Error deleting file'}), 500
 
 if __name__ == '__main__':
