@@ -325,6 +325,8 @@ def get_data_file() -> Optional[Tuple[str, str]]:
         return latest_data_file.filename, latest_data_file.upload_date
     return None
 
+#everything is perfect now. 
+
 def generate_leads(
     data_file_path: str,
     client_id: int,
