@@ -86,7 +86,7 @@
             <ul id="clientList" class="p-2">
                 {% if clients %}
                     {% for client in clients %}
-                        <li class="p-2 hover:bg-gray-100 cursor-pointer text-black" data-client-id="{{ client[0] }}">{{ client[1] }}</li>
+                        <li class="p-2 hover:bg-gray-100 cursor-pointer text-black" data-client-id="{{ client.id }}">{{ client.name }}</li>
                     {% endfor %}
                 {% else %}
                     <li class="p-2 text-gray-500">No clients available</li>
@@ -119,29 +119,29 @@
             <h2 class="text-base font-semibold mb-2">Suppression Summary</h2>
             <div id="summarySection">
                 {% if files %}
-                    {% for client_id in files | map(attribute=8) | unique %}
-                        {% set latest_suppression = files | selectattr('8', 'equalto', client_id) | max(attribute='5') %}
-                        {% if latest_suppression and latest_suppression[5] %}
+                    {% for client_id in files | map(attribute='client_id') | unique %}
+                        {% set latest_suppression = files | selectattr('client_id', 'equalto', client_id) | max(attribute='suppression_number') %}
+                        {% if latest_suppression and latest_suppression.suppression_number %}
                             <div class="mb-3" data-client-id="{{ client_id }}">
-                                <h3 class="text-sm font-medium mb-1.5">Latest Suppression (#{{ latest_suppression[5] }}) for {{ latest_suppression[7] }}</h3>
+                                <h3 class="text-sm font-medium mb-1.5">Latest Suppression (#{{ latest_suppression.suppression_number }}) for {{ latest_suppression.client_name }}</h3>
                                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                                    <div><strong>Total Phones Checked:</strong> {{ latest_suppression[11] }}</div>
-                                    <div><strong>Total Unique Phones Before Merge:</strong> {{ latest_suppression[12] }}</div>
-                                    <div><strong>Total Unique Phones After Merge:</strong> {{ latest_suppression[13] }}</div>
-                                    <div><strong>Duplicates Removed After Merge:</strong> {{ latest_suppression[14] }}</div>
+                                    <div><strong>Total Phones Checked:</strong> {{ latest_suppression.total_phones_checked }}</div>
+                                    <div><strong>Total Unique Phones Before Merge:</strong> {{ latest_suppression.unique_phones_before }}</div>
+                                    <div><strong>Total Unique Phones After Merge:</strong> {{ latest_suppression.unique_phones_after }}</div>
+                                    <div><strong>Duplicates Removed After Merge:</strong> {{ latest_suppression.duplicates_removed }}</div>
                                 </div>
                             </div>
                         {% endif %}
                     {% endfor %}
                 {% endif %}
                 {% if leads_files %}
-                    {% for client_id in leads_files | map(attribute=9) | unique %}
-                        {% set latest_leads = leads_files | selectattr('9', 'equalto', client_id) | max(attribute='3') %}
+                    {% for client_id in leads_files | map(attribute='client_id') | unique %}
+                        {% set latest_leads = leads_files | selectattr('client_id', 'equalto', client_id) | max(attribute='upload_date') %}
                         <div class="mb-3" data-client-id="{{ client_id }}">
-                            <h3 class="text-sm font-medium mb-1.5">Latest Leads for {{ latest_leads[8] }} (Suppression #{{ latest_leads[6] }})</h3>
+                            <h3 class="text-sm font-medium mb-1.5">Latest Leads for {{ latest_leads.client_name }} (Suppression #{{ latest_leads.suppression_number }})</h3>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                                <div><strong>Total Phones in Data File:</strong> {{ latest_leads[4] }}</div>
-                                <div><strong>Unique Leads:</strong> {{ latest_leads[5] }}</div>
+                                <div><strong>Total Phones in Data File:</strong> {{ latest_leads.total_phones }}</div>
+                                <div><strong>Unique Leads:</strong> {{ latest_leads.unique_leads }}</div>
                             </div>
                         </div>
                     {% endfor %}
@@ -223,7 +223,7 @@
             </div>
             <div class="mb-3">
                 {% if data_file %}
-                    <p class="text-sm"><strong>Current Data File:</strong> {{ data_file[0] }} (Uploaded: {{ data_file[1] }})</p>
+                    <p class="text-sm"><strong>Current Data File:</strong> {{ data_file.filename }} (Uploaded: {{ data_file.upload_date }})</p>
                 {% else %}
                     <p class="text-gray-500 text-sm">No data file uploaded.</p>
                 {% endif %}
@@ -282,7 +282,7 @@
             <select id="clientSelect" class="w-full p-1.5 border rounded mb-2 text-sm">
                 <option value="">Select a client</option>
                 {% for client in clients %}
-                    <option value="{{ client[0] }}">{{ client[1] }}</option>
+                    <option value="{{ client.id }}">{{ client.name }}</option>
                 {% endfor %}
             </select>
             <div class="flex justify-end">
@@ -389,7 +389,7 @@
                     <select id="leadsClientSelect" name="client_id" class="w-full p-1.5 border rounded text-sm" required>
                         <option value="">Select a client</option>
                         {% for client in clients %}
-                            <option value="{{ client[0] }}">{{ client[1] }}</option>
+                            <option value="{{ client.id }}">{{ client.name }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -751,32 +751,32 @@
 
             // Populate suppression summary section
             if (!clientId) {
-                const uniqueClientIds = [...new Set(filesData.map(f => f[8]))];
+                const uniqueClientIds = [...new Set(filesData.map(f => f.client_id))];
                 uniqueClientIds.forEach(cid => {
-                    const latest = filesData.filter(f => f[8] === cid).reduce((a, b) => a[5] > b[5] ? a : b, {});
-                    if (latest[5]) {
+                    const latest = filesData.filter(f => f.client_id === cid).reduce((a, b) => a.suppression_number > b.suppression_number ? a : b, {});
+                    if (latest.suppression_number) {
                         summarySection.append(`
                             <div class="mb-3" data-client-id="${cid}">
-                                <h3 class="text-sm font-medium mb-1.5">Latest Suppression (#${latest[5]}) for ${latest[7]}</h3>
+                                <h3 class="text-sm font-medium mb-1.5">Latest Suppression (#${latest.suppression_number}) for ${latest.client_name}</h3>
                                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                                    <div><strong>Total Phones Checked:</strong> ${latest[11]}</div>
-                                    <div><strong>Total Unique Phones Before Merge:</strong> ${latest[12]}</div>
-                                    <div><strong>Total Unique Phones After Merge:</strong> ${latest[13]}</div>
-                                    <div><strong>Duplicates Removed After Merge:</strong> ${latest[14]}</div>
+                                    <div><strong>Total Phones Checked:</strong> ${latest.total_phones_checked}</div>
+                                    <div><strong>Total Unique Phones Before Merge:</strong> ${latest.unique_phones_before}</div>
+                                    <div><strong>Total Unique Phones After Merge:</strong> ${latest.unique_phones_after}</div>
+                                    <div><strong>Duplicates Removed After Merge:</strong> ${latest.duplicates_removed}</div>
                                 </div>
                             </div>
                         `);
                     }
                 });
-                const uniqueLeadsClientIds = [...new Set(leadsFilesData.map(l => l[9]))];
+                const uniqueLeadsClientIds = [...new Set(leadsFilesData.map(l => l.client_id))];
                 uniqueLeadsClientIds.forEach(cid => {
-                    const latest = leadsFilesData.filter(l => l[9] === cid).reduce((a, b) => new Date(a[3]) > new Date(b[3]) ? a : b, {});
+                    const latest = leadsFilesData.filter(l => l.client_id === cid).reduce((a, b) => new Date(a.upload_date) > new Date(b.upload_date) ? a : b, {});
                     summarySection.append(`
                         <div class="mb-3" data-client-id="${cid}">
-                            <h3 class="text-sm font-medium mb-1.5">Latest Leads for ${latest[8]} (Suppression #${latest[6]})</h3>
+                            <h3 class="text-sm font-medium mb-1.5">Latest Leads for ${latest.client_name} (Suppression #${latest.suppression_number})</h3>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                                <div><strong>Total Phones in Data File:</strong> ${latest[4]}</div>
-                                <div><strong>Unique Leads:</strong> ${latest[5]}</div>
+                                <div><strong>Total Phones in Data File:</strong> ${latest.total_phones}</div>
+                                <div><strong>Unique Leads:</strong> ${latest.unique_leads}</div>
                             </div>
                         </div>
                     `);
@@ -785,66 +785,66 @@
                     summarySection.append('<p class="text-gray-500 text-sm">No suppressions or leads generated yet.</p>');
                 }
             } else {
-                const latest = filesData.filter(f => f[8].toString() === clientId).reduce((a, b) => a[5] > b[5] ? a : b, {});
-                if (latest[5]) {
+                const latest = filesData.filter(f => f.client_id.toString() === clientId).reduce((a, b) => a.suppression_number > b.suppression_number ? a : b, {});
+                if (latest.suppression_number) {
                     summarySection.append(`
                         <div class="mb-3" data-client-id="${clientId}">
-                            <h3 class="text-sm font-medium mb-1.5">Latest Suppression (#${latest[5]}) for ${latest[7]}</h3>
+                            <h3 class="text-sm font-medium mb-1.5">Latest Suppression (#${latest.suppression_number}) for ${latest.client_name}</h3>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                                <div><strong>Total Phones Checked:</strong> ${latest[11]}</div>
-                                <div><strong>Total Unique Phones Before Merge:</strong> ${latest[12]}</div>
-                                <div><strong>Total Unique Phones After Merge:</strong> ${latest[13]}</div>
-                                <div><strong>Duplicates Removed After Merge:</strong> ${latest[14]}</div>
+                                <div><strong>Total Phones Checked:</strong> ${latest.total_phones_checked}</div>
+                                <div><strong>Total Unique Phones Before Merge:</strong> ${latest.unique_phones_before}</div>
+                                <div><strong>Total Unique Phones After Merge:</strong> ${latest.unique_phones_after}</div>
+                                <div><strong>Duplicates Removed After Merge:</strong> ${latest.duplicates_removed}</div>
                             </div>
                         </div>
                     `);
                 }
-                const latestLeads = leadsFilesData.filter(l => l[9].toString() === clientId).reduce((a, b) => new Date(a[3]) > new Date(b[3]) ? a : b, {3: null});
-                if (latestLeads[3]) {
+                const latestLeads = leadsFilesData.filter(l => l.client_id.toString() === clientId).reduce((a, b) => new Date(a.upload_date) > new Date(b.upload_date) ? a : b, {upload_date: null});
+                if (latestLeads.upload_date) {
                     summarySection.append(`
                         <div class="mb-3" data-client-id="${clientId}">
-                            <h3 class="text-sm font-medium mb-1.5">Latest Leads for ${latestLeads[8]} (Suppression #${latestLeads[6]})</h3>
+                            <h3 class="text-sm font-medium mb-1.5">Latest Leads for ${latestLeads.client_name} (Suppression #${latestLeads.suppression_number})</h3>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                                <div><strong>Total Phones in Data File:</strong> ${latestLeads[4]}</div>
-                                <div><strong>Unique Leads:</strong> ${latestLeads[5]}</div>
+                                <div><strong>Total Phones in Data File:</strong> ${latestLeads.total_phones}</div>
+                                <div><strong>Unique Leads:</strong> ${latestLeads.unique_leads}</div>
                             </div>
                         </div>
                     `);
                 }
-                if (!latest[5] && !latestLeads[3]) {
+                if (!latest.suppression_number && !latestLeads.upload_date) {
                     summarySection.append('<p class="text-gray-500 text-sm">No suppressions or leads generated yet.</p>');
                 }
             }
 
             // Populate datasets and suppressions tables
             filesData.forEach(file => {
-                if (!clientId || file[8].toString() === clientId) {
+                if (!clientId || file.client_id.toString() === clientId) {
                     datasetsBody.append(`
                         <tr>
-                            <td class="p-1.5">${file[1]}</td>
-                            <td class="p-1.5">${new Date(file[3]).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}</td>
-                            <td class="p-1.5">${file[7]}</td>
-                            <td class="p-1.5 text-green-600">${file[9]}</td>
-                            <td class="p-1.5 text-red-600">${file[10]}</td>
+                            <td class="p-1.5">${file.filename}</td>
+                            <td class="p-1.5">${new Date(file.upload_date).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                            <td class="p-1.5">${file.client_name}</td>
+                            <td class="p-1.5 text-green-600">${file.unique_count}</td>
+                            <td class="p-1.5 text-red-600">${file.duplicate_count}</td>
                             <td class="p-1.5">
-                                <button onclick="deleteFile(${file[0]})" class="text-red-500 hover:text-red-700" title="Delete File">
+                                <button onclick="deleteFile(${file.id})" class="text-red-500 hover:text-red-700" title="Delete File">
                                     <i class="fas fa-trash"></i>
                                 </button>
                             </td>
                         </tr>
                     `);
 
-                    if (file[2]) {
-                        const existing = suppressionsBody.find(`tr[data-suppression="${file[5]}"]`);
+                    if (file.output_filename) {
+                        const existing = suppressionsBody.find(`tr[data-suppression="${file.suppression_number}"]`);
                         if (!existing.length) {
                             suppressionsBody.append(`
-                                <tr data-suppression="${file[5]}">
-                                    <td class="p-1.5">${file[5]}</td>
-                                    <td class="p-1.5">${file[2]}</td>
-                                    <td class="p-1.5">${file[4]}</td>
-                                    <td class="p-1.5">${file[7]}</td>
+                                <tr data-suppression="${file.suppression_number}">
+                                    <td class="p-1.5">${file.suppression_number}</td>
+                                    <td class="p-1.5">${file.output_filename}</td>
+                                    <td class="p-1.5">${file.status}</td>
+                                    <td class="p-1.5">${file.client_name}</td>
                                     <td class="p-1.5">
-                                        <a href="/download/${file[2]}" class="text-blue-500 hover:underline">Download</a>
+                                        <a href="/download/${file.output_filename}" class="text-blue-500 hover:underline">Download</a>
                                     </td>
                                 </tr>
                             `);
@@ -855,20 +855,20 @@
 
             // Populate leads table
             leadsFilesData.forEach(lead => {
-                if (!clientId || lead[9].toString() === clientId) {
+                if (!clientId || lead.client_id.toString() === clientId) {
                     leadsBody.append(`
                         <tr>
-                            <td class="p-1.5">${lead[1]}</td>
-                            <td class="p-1.5">${lead[2] || 'No leads found'}</td>
-                            <td class="p-1.5">${lead[8]}</td>
-                            <td class="p-1.5">${new Date(lead[3]).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}</td>
-                            <td class="p-1.5">${lead[11] || 'None'}</td>
-                            <td class="p-1.5">${lead[12] || 'None'}</td>
-                            <td class="p-1.5">${lead[13] ? 'Yes' : 'No'}</td>
-                            <td class="p-1.5">${lead[14] || 'All'}</td>
-                            <td class="p-1.5">${lead[15] || 'None'}</td>
+                            <td class="p-1.5">${lead.data_filename}</td>
+                            <td class="p-1.5">${lead.output_filename || 'No leads found'}</td>
+                            <td class="p-1.5">${lead.client_name}</td>
+                            <td class="p-1.5">${new Date(lead.upload_date).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                            <td class="p-1.5">${lead.revenue_filter || 'None'}</td>
+                            <td class="p-1.5">${lead.number_type_filter || 'None'}</td>
+                            <td class="p-1.5">${lead.email_filter ? 'Yes' : 'No'}</td>
+                            <td class="p-1.5">${lead.lead_quantity || 'All'}</td>
+                            <td class="p-1.5">${lead.custom_filters || 'None'}</td>
                             <td class="p-1.5">
-                                ${lead[2] ? `<a href="/download/${lead[2]}" class="text-blue-500 hover:underline">Download</a>` : 'N/A'}
+                                ${lead.output_filename ? `<a href="/download/${lead.output_filename}" class="text-blue-500 hover:underline">Download</a>` : 'N/A'}
                             </td>
                         </tr>
                     `);

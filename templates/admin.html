@@ -55,13 +55,13 @@
                     <tbody>
                         {% for user in users %}
                         <tr class="border-b">
-                            <td class="p-2 truncate">{{ user[1] }}</td>
-                            <td class="p-2 truncate">{{ user[2] }}</td>
-                            <td class="p-2">{{ user[3] | capitalize }}</td>
+                            <td class="p-2 truncate">{{ user.username }}</td>
+                            <td class="p-2 truncate">{{ user.full_name }}</td>
+                            <td class="p-2">{{ user.role | capitalize }}</td>
                             <td class="p-2 flex space-x-2">
-                                <button class="bg-yellow-500 hover:bg-yellow-600 text-white px-2 py-1 rounded text-xs edit-user-btn" data-id="{{ user[0] }}" data-username="{{ user[1] }}" data-fullname="{{ user[2] }}" data-role="{{ user[3] }}">Edit</button>
-                                {% if user[0] != current_user.id %}
-                                <button class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs delete-user-btn" data-id="{{ user[0] }}" data-username="{{ user[1] }}">Delete</button>
+                                <button class="bg-yellow-500 hover:bg-yellow-600 text-white px-2 py-1 rounded text-xs edit-user-btn" data-id="{{ user.id }}" data-username="{{ user.username }}" data-fullname="{{ user.full_name }}" data-role="{{ user.role }}">Edit</button>
+                                {% if user.id != current_user.id %}
+                                <button class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs delete-user-btn" data-id="{{ user.id }}" data-username="{{ user.username }}">Delete</button>
                                 {% endif %}
                             </td>
                         </tr>
