@@ -21,8 +21,8 @@ app.secret_key = os.getenv('SECRET_KEY', 'your-secret-key')
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
 
 # SQLAlchemy configuration
-# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////var/www/sup/instance/database.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 csrf = CSRFProtect(app)
@@ -1032,6 +1032,7 @@ def upload_data():
         logger.error(f'Error uploading data file: {str(e)}\n{traceback.format_exc()}')
         db.session.rollback()
         return jsonify({'status': 'error', 'message': f'Error uploading data file: {str(e)}'}), 500
+    
 
 @app.route('/generate_leads', methods=['POST'])
 @login_required
