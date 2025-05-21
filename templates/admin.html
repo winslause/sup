@@ -74,6 +74,40 @@
                 </table>
             </div>
         </section>
+
+        <!-- Clients Section -->
+        <section class="bg-white p-4 rounded-lg shadow mb-4">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold">Clients</h2>
+                <button id="addClientBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Add Client</button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="bg-gray-200">
+                            <th class="p-2 text-left">Name</th>
+                            <th class="p-2 text-left">Details</th>
+                            <th class="p-2 text-left">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for client in clients %}
+                        <tr class="border-b">
+                            <td class="p-2 truncate">{{ client.name }}</td>
+                            <td class="p-2 truncate">{{ client.details or 'No details' }}</td>
+                            <td class="p-2">
+                                <button class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs delete-client-btn" data-id="{{ client.id }}" data-name="{{ client.name }}">Delete</button>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="3" class="p-2 text-center">No clients found</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
     </main>
 
     <!-- Add User Modal -->
@@ -172,6 +206,23 @@
         </div>
     </div>
 
+    <!-- Delete Client Modal -->
+    <div id="deleteClientModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+        <div class="bg-white p-3 rounded-lg w-full max-w-md">
+            <h2 class="text-base font-semibold mb-2">Delete Client</h2>
+            <p class="text-sm mb-2">Are you sure you want to delete client <span id="deleteClientName"></span>?</p>
+            <form id="deleteClientForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="client_id" id="deleteClientId">
+                <div class="flex justify-end">
+                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('deleteClientModal')">Cancel</button>
+                    <button type="submit" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded text-sm">Delete</button>
+                </div>
+            </form>
+            <p id="deleteClientStatus" class="mt-2 text-sm"></p>
+        </div>
+    </div>
+
     <!-- Change Password Modal -->
     <div id="changePasswordModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
         <div class="bg-white p-3 rounded-lg w-full max-w-md">
@@ -211,6 +262,29 @@
                 </div>
             </form>
             <p id="changePasswordStatus" class="mt-2 text-sm"></p>
+        </div>
+    </div>
+
+    <!-- Add Client Modal -->
+    <div id="addClientModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+        <div class="bg-white p-3 rounded-lg w-full max-w-md">
+            <h2 class="text-base font-semibold mb-2">Add Client</h2>
+            <form id="addClientForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Client Name</label>
+                    <input type="text" name="name" class="w-full p-1.5 border rounded text-sm" required>
+                </div>
+                <div class="mb-2">
+                    <label class="block text-sm font-medium mb-1">Details</label>
+                    <textarea name="details" class="w-full p-1.5 border rounded text-sm"></textarea>
+                </div>
+                <div class="flex justify-end">
+                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('addClientModal')">Cancel</button>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Add Client</button>
+                </div>
+            </form>
+            <p id="addClientStatus" class="mt-2 text-sm"></p>
         </div>
     </div>
 
@@ -355,6 +429,85 @@
                 },
                 error: function(xhr) {
                     $('#deleteUserStatus').text('Error deleting user').addClass('text-red-600');
+                }
+            });
+        });
+
+        // Add Client
+        $('#addClientBtn').on('click', () => openModal('addClientModal'));
+
+        $('#addClientForm').on('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            $.ajax({
+                url: '/add_client',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                success: function(response) {
+                    $('#addClientStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    if (response.status === 'success') {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    }
+                },
+                error: function(xhr) {
+                    let errorMessage = 'Error adding client';
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        if (response.message) {
+                            errorMessage = response.message;
+                        }
+                    } catch (e) {
+                        errorMessage = xhr.responseText || 'Error adding client';
+                    }
+                    $('#addClientStatus').text(errorMessage).addClass('text-red-600');
+                }
+            });
+        });
+
+        // Delete Client
+        $('.delete-client-btn').on('click', function() {
+            const clientId = $(this).data('id');
+            const clientName = $(this).data('name');
+            $('#deleteClientId').val(clientId);
+            $('#deleteClientName').text(clientName);
+            openModal('deleteClientModal');
+        });
+
+        $('#deleteClientForm').on('submit', function(e) {
+            e.preventDefault();
+            const clientId = $('#deleteClientId').val();
+            const formData = new FormData(this);
+            $.ajax({
+                url: `/delete_client/${clientId}`,
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                success: function(response) {
+                    $('#deleteClientStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    if (response.status === 'success') {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    }
+                },
+                error: function(xhr) {
+                    let errorMessage = 'Error deleting client';
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        if (response.message) {
+                            errorMessage = response.message;
+                        }
+                    } catch (e) {
+                        errorMessage = xhr.responseText || 'Error deleting client';
+                    }
+                    $('#deleteClientStatus').text(errorMessage).addClass('text-red-600');
                 }
             });
         });

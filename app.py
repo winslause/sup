@@ -758,7 +758,8 @@ def dashboard():
 @admin_required
 def admin_portal():
     users = User.query.all()
-    return render_template('admin.html', users=users, csrf_token=generate_csrf())
+    clients = Client.query.all()
+    return render_template('admin.html', users=users, clients=clients, csrf_token=generate_csrf())
 
 @app.route('/add_user', methods=['POST'])
 @admin_required
@@ -892,6 +893,33 @@ def delete_user(user_id):
         db.session.rollback()
         return jsonify({'status': 'error', 'message': 'Error deleting user'}), 500
 
+@app.route('/delete_client/<int:client_id>', methods=['POST'])
+@admin_required
+def delete_client(client_id):
+    try:
+        client = Client.query.get(client_id)
+        if not client:
+            logger.warning(f"Client ID {client_id} not found for deletion by user {current_user.username}")
+            return jsonify({'status': 'error', 'message': 'Client not found'}), 404
+
+        # Check for associated files or leads
+        associated_files = File.query.filter_by(client_id=client_id).first()
+        associated_leads_files = LeadsFile.query.filter_by(client_id=client_id).first()
+        associated_used_leads = UsedLead.query.filter_by(client_id=client_id).first()
+        if associated_files or associated_leads_files or associated_used_leads:
+            logger.warning(f"Cannot delete client ID {client_id}: Associated files or leads exist")
+            return jsonify({'status': 'error', 'message': 'Cannot delete client with associated files or leads'}), 400
+
+        db.session.delete(client)
+        db.session.commit()
+        logger.info(f"Client ID {client_id} deleted successfully by user {current_user.username}")
+        return jsonify({'status': 'success', 'message': 'Client deleted successfully'})
+    except Exception as e:
+        logger.error(f"Error deleting client {client_id} by user {current_user.username}: {str(e)}")
+        db.session.rollback()
+        return jsonify({'status': 'error', 'message': 'Error deleting client'}), 500
+    
+    
 @app.route('/upload', methods=['POST'])
 @login_required
 def upload():
