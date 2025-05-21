@@ -1006,6 +1006,11 @@ def upload_data():
         if not allowed_file(file.filename):
             logger.error(f'Upload failed: Invalid file type {file.filename}')
             return jsonify({'status': 'error', 'message': 'Invalid file type. Allowed types: csv, xlsx'}), 400
+        if file.seek(0, os.SEEK_END) == 0:
+            file.seek(0)
+            logger.error('Upload failed: File is empty')
+            return jsonify({'status': 'error', 'message': 'File is empty'}), 400
+        file.seek(0)
         filename = secure_filename(file.filename)
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         logger.info(f'Attempting to save file {filename} to {file_path}')
@@ -1026,7 +1031,7 @@ def upload_data():
     except Exception as e:
         logger.error(f'Error uploading data file: {str(e)}\n{traceback.format_exc()}')
         db.session.rollback()
-        return jsonify({'status': 'error', 'message': 'Error uploading data file'}), 500
+        return jsonify({'status': 'error', 'message': f'Error uploading data file: {str(e)}'}), 500
 
 @app.route('/generate_leads', methods=['POST'])
 @login_required

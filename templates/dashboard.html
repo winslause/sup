@@ -647,37 +647,43 @@
                 });
             });
 
-            // Upload data file form submission
-            $('#uploadDataForm, #editDataForm').on('submit', function(e) {
-                e.preventDefault();
-                const modalId = $(this).attr('id') === 'uploadDataForm' ? 'uploadDataModal' : 'editDataModal';
-                const statusId = modalId === 'uploadDataModal' ? 'uploadDataStatus' : 'editDataStatus';
-                const loadingId = modalId === 'uploadDataModal' ? 'uploadDataLoading' : 'editDataLoading';
-                $(`#${loadingId}`).removeClass('hidden');
-                $(`#${statusId}`).text('').removeClass('text-red-600 text-green-600');
-                const formData = new FormData(this);
-                $.ajax({
-                    url: '/upload_data',
-                    type: 'POST',
-                    data: formData,
-                    processData: false,
-                    contentType: false,
-                    headers: {'X-CSRF-Token': formData.get('csrf_token')},
-                    success: function(response) {
-                        $(`#${loadingId}`).addClass('hidden');
-                        $(`#${statusId}`).text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
-                        if (response.status === 'success') {
-                            setTimeout(() => {
-                                window.location.reload();
-                            }, 1000);
-                        }
-                    },
-                    error: function(xhr) {
-                        $(`#${loadingId}`).addClass('hidden');
-                        $(`#${statusId}`).text('Error uploading data file').addClass('text-red-600');
-                    }
-                });
-            });
+           $('#uploadDataForm, #editDataForm').on('submit', function(e) {
+    e.preventDefault();
+    const modalId = $(this).attr('id') === 'uploadDataForm' ? 'uploadDataModal' : 'editDataModal';
+    const statusId = modalId === 'uploadDataModal' ? 'uploadDataStatus' : 'editDataStatus';
+    const loadingId = modalId === 'uploadDataModal' ? 'uploadDataLoading' : 'editDataLoading';
+    $(`#${loadingId}`).removeClass('hidden');
+    $(`#${statusId}`).text('').removeClass('text-red-600 text-green-600');
+    const formData = new FormData(this);
+    $.ajax({
+        url: '/upload_data',
+        type: 'POST',
+        data: formData,
+        processData: false,
+        contentType: false,
+        headers: {'X-CSRF-Token': formData.get('csrf_token')},
+        success: function(response) {
+            $(`#${loadingId}`).addClass('hidden');
+            $(`#${statusId}`).text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+            if (response.status === 'success') {
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            }
+        },
+        error: function(xhr) {
+            $(`#${loadingId}`).addClass('hidden');
+            let errorMsg = 'Error uploading data file';
+            try {
+                const response = JSON.parse(xhr.responseText);
+                errorMsg = response.message || errorMsg;
+            } catch (e) {
+                console.error('Error parsing error response:', e);
+            }
+            $(`#${statusId}`).text(errorMsg).addClass('text-red-600');
+        }
+    });
+});
 
             // Initial table population
             try {
