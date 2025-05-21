@@ -21,7 +21,8 @@ app.secret_key = os.getenv('SECRET_KEY', 'your-secret-key')
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
 
 # SQLAlchemy configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
+# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////var/www/sup/instance/database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 csrf = CSRFProtect(app)
@@ -994,22 +995,38 @@ def upload():
 @app.route('/upload_data', methods=['POST'])
 @login_required
 def upload_data():
-    file = request.files.get('file')
-    if not file or not allowed_file(file.filename):
-        return jsonify({'status': 'error', 'message': 'No valid file uploaded'})
-
-    filename = secure_filename(file.filename)
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    file.save(file_path)
-    logger.info(f"Uploaded data file: {filename}")
-
-    DataFile.query.delete()
-    new_data_file = DataFile(filename=filename, upload_date=datetime.datetime.now().isoformat())
-    db.session.add(new_data_file)
-    db.session.commit()
-    logger.info(f"Stored data file: {filename}")
-
-    return jsonify({'status': 'success', 'message': 'Data file uploaded successfully'})
+    try:
+        if 'file' not in request.files:
+            logger.error('Upload failed: No file part in request')
+            return jsonify({'status': 'error', 'message': 'No file part in the request'}), 400
+        file = request.files['file']
+        if file.filename == '':
+            logger.error('Upload failed: No file selected')
+            return jsonify({'status': 'error', 'message': 'No file selected'}), 400
+        if not allowed_file(file.filename):
+            logger.error(f'Upload failed: Invalid file type {file.filename}')
+            return jsonify({'status': 'error', 'message': 'Invalid file type. Allowed types: csv, xlsx'}), 400
+        filename = secure_filename(file.filename)
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        logger.info(f'Attempting to save file {filename} to {file_path}')
+        file.save(file_path)
+        logger.info(f'File {filename} saved successfully')
+        # Clear existing data files
+        DataFile.query.delete()
+        # Save to database
+        upload_date = datetime.datetime.now().isoformat()
+        new_data_file = DataFile(filename=filename, upload_date=upload_date)
+        db.session.add(new_data_file)
+        db.session.commit()
+        logger.info(f'Stored data file {filename} in database')
+        return jsonify({'status': 'success', 'message': 'Data file uploaded successfully'})
+    except RequestEntityTooLarge:
+        logger.error('Upload failed: File too large')
+        return jsonify({'status': 'error', 'message': 'File too large. Maximum size is 100MB'}), 413
+    except Exception as e:
+        logger.error(f'Error uploading data file: {str(e)}\n{traceback.format_exc()}')
+        db.session.rollback()
+        return jsonify({'status': 'error', 'message': 'Error uploading data file'}), 500
 
 @app.route('/generate_leads', methods=['POST'])
 @login_required
