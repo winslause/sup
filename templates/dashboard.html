@@ -53,29 +53,41 @@
             hyphens: auto;
             padding: 0.375rem 0.75rem;
         }
+        th {
+            white-space: nowrap; /* Prevent wrapping of header text */
+        }
         .table-container {
             width: 100%;
             overflow-x: auto;
         }
         @media (min-width: 768px) {
             main {
-                max-width: calc(100vw - 16rem);
+                max-width: calc(100vw - 14rem); /* Adjusted for smaller sidebar */
+                margin-left: 0.5rem; /* Add margin between sidebar and main content */
             }
         }
         .custom-filter {
             display: flex;
+            flex-wrap: wrap; /* Allow wrapping to prevent overflow */
             align-items: center;
             gap: 0.5rem;
             margin-bottom: 0.5rem;
         }
         .custom-filter input, .custom-filter select {
             flex: 1;
+            min-width: 100px; /* Ensure inputs don't shrink too much */
+        }
+        .custom-filter button {
+            flex-shrink: 0; /* Prevent button from shrinking */
+        }
+        #leadsModal .bg-white {
+            max-width: 90vw; /* Ensure modal fits within viewport */
         }
     </style>
 </head>
 <body class="bg-gray-100 font-sans">
     <!-- Sidebar -->
-    <div id="sidebar" class="fixed left-0 w-64 bg-white shadow-lg sidebar md:sidebar-open">
+    <div id="sidebar" class="fixed left-0 w-56 bg-white shadow-lg sidebar md:sidebar-open"> <!-- Changed w-64 to w-56 -->
         <div class="flex items-center justify-between p-3 border-b">
             <h2 class="text-base font-semibold">Clients</h2>
             <button id="sidebarToggle" class="text-gray-600 md:hidden">
@@ -113,7 +125,7 @@
     </header>
 
     <!-- Main Content -->
-    <main class="container mx-auto p-3 pt-16 md:pl-64 w-full box-border max-w-full overflow-x-hidden">
+    <main class="container mx-auto p-3 pt-16 md:pl-56 w-full box-border max-w-full overflow-x-hidden"> <!-- Changed md:pl-64 to md:pl-56 -->
         <!-- Suppression Summary -->
         <div class="bg-white p-3 rounded-lg shadow-md mb-3 fade-in">
             <h2 class="text-base font-semibold mb-2">Suppression Summary</h2>
@@ -379,7 +391,7 @@
 
     <!-- Generate Leads Modal -->
     <div id="leadsModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
-        <div class="bg-white p-3 rounded-lg w-full max-w-lg">
+        <div class="bg-white p-3 rounded-lg w-full max-w-2xl"> <!-- Increased max-w-lg to max-w-2xl -->
             <h2 class="text-base font-semibold mb-2">Generate Leads</h2>
             <form id="leadsForm" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -430,7 +442,7 @@
                                 <option value="contains">Contains</option>
                             </select>
                             <input type="text" name="custom_value" placeholder="Value (e.g., 30)" class="p-1.5 border rounded text-sm">
-                            <button type="button" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="this.parentElement.remove()">Remove</button>
+                            <button type="button" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-sm">Remove</button>
                         </div>
                     </div>
                     <button type="button" id="addCustomFilterBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm mt-2">Add Custom Filter</button>
@@ -546,7 +558,7 @@
                             <option value="contains">Contains</option>
                         </select>
                         <input type="text" name="custom_value" placeholder="Value (e.g., 30)" class="p-1.5 border rounded text-sm">
-                        <button type="button" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="this.parentElement.remove()">Remove</button>
+                        <button type="button" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-sm">Remove</button>
                     </div>
                 `;
                 $('#custom-filters').append(newFilter);
@@ -647,43 +659,43 @@
                 });
             });
 
-           $('#uploadDataForm, #editDataForm').on('submit', function(e) {
-    e.preventDefault();
-    const modalId = $(this).attr('id') === 'uploadDataForm' ? 'uploadDataModal' : 'editDataModal';
-    const statusId = modalId === 'uploadDataModal' ? 'uploadDataStatus' : 'editDataStatus';
-    const loadingId = modalId === 'uploadDataModal' ? 'uploadDataLoading' : 'editDataLoading';
-    $(`#${loadingId}`).removeClass('hidden');
-    $(`#${statusId}`).text('').removeClass('text-red-600 text-green-600');
-    const formData = new FormData(this);
-    $.ajax({
-        url: '/upload_data',
-        type: 'POST',
-        data: formData,
-        processData: false,
-        contentType: false,
-        headers: {'X-CSRF-Token': formData.get('csrf_token')},
-        success: function(response) {
-            $(`#${loadingId}`).addClass('hidden');
-            $(`#${statusId}`).text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
-            if (response.status === 'success') {
-                setTimeout(() => {
-                    window.location.reload();
-                }, 1000);
-            }
-        },
-        error: function(xhr) {
-            $(`#${loadingId}`).addClass('hidden');
-            let errorMsg = 'Error uploading data file';
-            try {
-                const response = JSON.parse(xhr.responseText);
-                errorMsg = response.message || errorMsg;
-            } catch (e) {
-                console.error('Error parsing error response:', e);
-            }
-            $(`#${statusId}`).text(errorMsg).addClass('text-red-600');
-        }
-    });
-});
+            $('#uploadDataForm, #editDataForm').on('submit', function(e) {
+                e.preventDefault();
+                const modalId = $(this).attr('id') === 'uploadDataForm' ? 'uploadDataModal' : 'editDataModal';
+                const statusId = modalId === 'uploadDataModal' ? 'uploadDataStatus' : 'editDataStatus';
+                const loadingId = modalId === 'uploadDataModal' ? 'uploadDataLoading' : 'editDataLoading';
+                $(`#${loadingId}`).removeClass('hidden');
+                $(`#${statusId}`).text('').removeClass('text-red-600 text-green-600');
+                const formData = new FormData(this);
+                $.ajax({
+                    url: '/upload_data',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                    success: function(response) {
+                        $(`#${loadingId}`).addClass('hidden');
+                        $(`#${statusId}`).text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                        if (response.status === 'success') {
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 1000);
+                        }
+                    },
+                    error: function(xhr) {
+                        $(`#${loadingId}`).addClass('hidden');
+                        let errorMsg = 'Error uploading data file';
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            errorMsg = response.message || errorMsg;
+                        } catch (e) {
+                            console.error('Error parsing error response:', e);
+                        }
+                        $(`#${statusId}`).text(errorMsg).addClass('text-red-600');
+                    }
+                });
+            });
 
             // Initial table population
             try {
@@ -717,7 +729,7 @@
                             <option value="contains">Contains</option>
                         </select>
                         <input type="text" name="custom_value" placeholder="Value (e.g., 30)" class="p-1.5 border rounded text-sm">
-                        <button type="button" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="this.parentElement.remove()">Remove</button>
+                        <button type="button" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-sm">Remove</button>
                     </div>
                 `);
                 $('#custom_filters_json').val('');

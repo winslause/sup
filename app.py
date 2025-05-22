@@ -903,22 +903,46 @@ def delete_client(client_id):
             logger.warning(f"Client ID {client_id} not found for deletion by user {current_user.username}")
             return jsonify({'status': 'error', 'message': 'Client not found'}), 404
 
-        # Check for associated files or leads
-        associated_files = File.query.filter_by(client_id=client_id).first()
-        associated_leads_files = LeadsFile.query.filter_by(client_id=client_id).first()
-        associated_used_leads = UsedLead.query.filter_by(client_id=client_id).first()
-        if associated_files or associated_leads_files or associated_used_leads:
-            logger.warning(f"Cannot delete client ID {client_id}: Associated files or leads exist")
-            return jsonify({'status': 'error', 'message': 'Cannot delete client with associated files or leads'}), 400
+        # Delete associated files and remove them from storage
+        associated_files = File.query.filter_by(client_id=client_id).all()
+        for file in associated_files:
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+            output_file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.output_filename) if file.output_filename else None
+            db.session.delete(file)
+            # Remove files from storage if they exist
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"Removed file from storage: {file.filename}")
+            if file.output_filename and os.path.exists(output_file_path):
+                os.remove(output_file_path)
+                logger.info(f"Removed output file from storage: {file.output_filename}")
 
+        # Delete associated leads files and remove them from storage
+        associated_leads_files = LeadsFile.query.filter_by(client_id=client_id).all()
+        for leads_file in associated_leads_files:
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], leads_file.data_filename)
+            output_file_path = os.path.join(app.config['UPLOAD_FOLDER'], leads_file.output_filename) if leads_file.output_filename else None
+            db.session.delete(leads_file)
+            # Remove files from storage if they exist
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"Removed leads file from storage: {leads_file.data_filename}")
+            if leads_file.output_filename and os.path.exists(output_file_path):
+                os.remove(output_file_path)
+                logger.info(f"Removed leads output file from storage: {leads_file.output_filename}")
+
+        # Delete associated used leads
+        UsedLead.query.filter_by(client_id=client_id).delete()
+
+        # Delete the client
         db.session.delete(client)
         db.session.commit()
-        logger.info(f"Client ID {client_id} deleted successfully by user {current_user.username}")
-        return jsonify({'status': 'success', 'message': 'Client deleted successfully'})
+        logger.info(f"Client ID {client_id} and all associated data deleted successfully by user {current_user.username}")
+        return jsonify({'status': 'success', 'message': 'Client and all associated data deleted successfully'})
     except Exception as e:
-        logger.error(f"Error deleting client {client_id} by user {current_user.username}: {str(e)}")
+        logger.error(f"Error deleting client {client_id} and associated data by user {current_user.username}: {str(e)}")
         db.session.rollback()
-        return jsonify({'status': 'error', 'message': 'Error deleting client'}), 500
+        return jsonify({'status': 'error', 'message': 'Error deleting client and associated data'}), 500
     
     
 @app.route('/upload', methods=['POST'])

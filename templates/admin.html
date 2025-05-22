@@ -6,6 +6,8 @@
     <title>Admin Portal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
     <style>
         .modal { display: none; }
         .modal.show { display: flex; }
@@ -492,9 +494,28 @@
                 success: function(response) {
                     $('#deleteClientStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
                     if (response.status === 'success') {
+                        // Show Toastify success message
+                        Toastify({
+                            text: response.message || "Client deleted successfully!",
+                            duration: 2000,
+                            gravity: "top",
+                            position: "right",
+                            backgroundColor: "#4CAF50",
+                            stopOnFocus: true
+                        }).showToast();
                         setTimeout(() => {
                             window.location.reload();
-                        }, 1000);
+                        }, 2000); // Reload after 2 seconds to allow toast visibility
+                    } else {
+                        // Show Toastify error message
+                        Toastify({
+                            text: response.message || "Error deleting client",
+                            duration: 3000,
+                            gravity: "top",
+                            position: "right",
+                            backgroundColor: "#F44336",
+                            stopOnFocus: true
+                        }).showToast();
                     }
                 },
                 error: function(xhr) {
@@ -508,6 +529,15 @@
                         errorMessage = xhr.responseText || 'Error deleting client';
                     }
                     $('#deleteClientStatus').text(errorMessage).addClass('text-red-600');
+                    // Show Toastify error message
+                    Toastify({
+                        text: errorMessage,
+                        duration: 3000,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: "#F44336",
+                        stopOnFocus: true
+                    }).showToast();
                 }
             });
         });
