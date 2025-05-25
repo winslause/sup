@@ -43,6 +43,12 @@
                 <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded text-sm">Login</button>
             </div>
         </form>
+        
+        <!-- Link to Check Files for Uniques -->
+        <p class="mt-4 text-sm text-center">
+            For other users: <a href="{{ url_for('check') }}" class="text-blue-500 hover:text-blue-600 underline">Check your files for uniques</a>
+        </p>
+        
         <p id="loginStatus" class="mt-4 text-sm text-red-600 hidden"></p>
     </div>
 

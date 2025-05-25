@@ -3,7 +3,7 @@ from flask_wtf.csrf import CSRFProtect, generate_csrf
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import func, text
+from sqlalchemy import func
 import os
 import pandas as pd
 from werkzeug.utils import secure_filename
@@ -12,6 +12,7 @@ import logging
 import re
 import json
 import bcrypt
+import uuid
 from typing import Tuple, Optional, Set, Dict, List
 from pandas import ExcelWriter
 from functools import wraps
@@ -22,7 +23,6 @@ app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
 
 # SQLAlchemy configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
-
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 csrf = CSRFProtect(app)
@@ -284,6 +284,78 @@ def suppress_leads(input_dfs: List[pd.DataFrame], used_numbers: Set[str], suppre
         logger.error(f"Error in suppression {suppression_number}: {str(e)}")
         return None, 'failed', file_metrics, {'total_checked': total_checked}
 
+def process_suppression_check(file_paths: List[str], suppression_number: int) -> Tuple[Optional[str], str, List[Dict[str, int]], Dict[str, int]]:
+    try:
+        input_dfs = []
+        for idx, file_path in enumerate(file_paths):
+            try:
+                if file_path.endswith('.csv'):
+                    chunks = pd.read_csv(file_path, chunksize=10000, usecols=lambda x: x.lower() in ['phone', 'mobile'])
+                    df_chunks = []
+                    for chunk in chunks:
+                        df_chunks.append(chunk)
+                    if df_chunks:
+                        df = pd.concat(df_chunks, ignore_index=True)
+                    else:
+                        df = pd.DataFrame()
+                else:
+                    df = pd.read_excel(file_path, engine='openpyxl', usecols=lambda x: x.lower() in ['phone', 'mobile'])
+                    if df.empty:
+                        df = pd.DataFrame()
+                input_dfs.append(df)
+                logger.info(f"Loaded file {idx + 1}: {file_path} with {len(df)} rows")
+            except Exception as e:
+                logger.warning(f"Skipping file {file_path}: {str(e)}")
+                input_dfs.append(pd.DataFrame())
+                continue
+
+        if not any(not df.empty for df in input_dfs):
+            logger.error("No valid files to process")
+            return None, 'failed', [{'unique_count': 0, 'duplicate_count': 0}] * len(file_paths), {'total_checked': 0}
+
+        # Suppress without prior numbers (empty used_numbers set)
+        used_numbers = set()
+        output_df, status, file_metrics, summary_metrics = suppress_leads(input_dfs, used_numbers, suppression_number)
+        if output_df is None or output_df.empty:
+            logger.error(f"Suppression {suppression_number} failed: No valid output generated")
+            return None, 'failed', file_metrics, summary_metrics
+
+        logger.info(f"Output DataFrame has {len(output_df)} rows and columns: {output_df.columns.tolist()}")
+        if not all(col in output_df.columns for col in ['phone', 'status']):
+            logger.error(f"Suppression {suppression_number} failed: Output DataFrame missing required columns")
+            return None, 'failed', file_metrics, summary_metrics
+
+        max_excel_rows = 1048576
+        output_filename = f"check_suppression_{suppression_number}"
+        output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
+
+        # Save only unique phones
+        unique_df = output_df[output_df['status'] == 'unique'][['phone']]
+        if unique_df.empty:
+            logger.warning("No unique phones found after suppression")
+            return None, 'completed', file_metrics, summary_metrics
+
+        if len(unique_df) > max_excel_rows:
+            output_filename += '.csv'
+            output_path += '.csv'
+            unique_df.to_csv(output_path, index=False)
+            logger.info(f"Saved output as CSV: {output_filename} with {len(unique_df)} rows")
+        else:
+            output_filename += '.xlsx'
+            output_path += '.xlsx'
+            with ExcelWriter(output_path, engine='openpyxl') as writer:
+                unique_df.to_excel(writer, index=False, sheet_name='Unique_Phones')
+            logger.info(f"Saved output as Excel: {output_filename} with {len(unique_df)} rows")
+
+        if not os.path.exists(output_path):
+            logger.error(f"Suppression {suppression_number} failed: Output file {output_filename} was not created")
+            return None, 'failed', file_metrics, summary_metrics
+
+        return output_filename, status, file_metrics, summary_metrics
+    except Exception as e:
+        logger.error(f"Error processing suppression check {suppression_number}: {str(e)}")
+        return None, 'failed', [{'unique_count': 0, 'duplicate_count': 0}] * len(file_paths), {'total_checked': 0}
+
 def get_suppression_number(client_id: int) -> int:
     max_number = db.session.query(func.max(File.suppression_number)).filter_by(client_id=client_id).scalar()
     return (max_number or 0) + 1
@@ -325,8 +397,6 @@ def get_data_file() -> Optional[Tuple[str, str]]:
     if latest_data_file:
         return latest_data_file.filename, latest_data_file.upload_date
     return None
-
-#everything is perfect now. 
 
 def generate_leads(
     data_file_path: str,
@@ -710,7 +780,7 @@ def dashboard():
         {
             'id': f.id,
             'client_id': f.client_id,
-            'client_name': f.client.name,  # Add client name
+            'client_name': f.client.name,
             'filename': f.filename,
             'output_filename': f.output_filename,
             'upload_date': f.upload_date,
@@ -730,7 +800,7 @@ def dashboard():
         {
             'id': lf.id,
             'client_id': lf.client_id,
-            'client_name': lf.client.name,  # Add client name
+            'client_name': lf.client.name,
             'data_filename': lf.data_filename,
             'output_filename': lf.output_filename,
             'upload_date': lf.upload_date,
@@ -833,10 +903,8 @@ def add_client():
         return jsonify({'status': 'error', 'message': 'Server error occurred'}), 500
 
 @app.route('/edit_user/<int:user_id>', methods=['POST'])
-@login_required
+@admin_required
 def edit_user(user_id):
-    if current_user.role != 'admin':
-        return jsonify({'status': 'error', 'message': 'Access denied'}), 403
     data = request.form
     username = sanitize_input(data.get('username', ''))
     full_name = sanitize_input(data.get('full_name', ''))
@@ -875,10 +943,8 @@ def edit_user(user_id):
         return jsonify({'status': 'error', 'message': 'Server error occurred'}), 500
 
 @app.route('/delete_user/<int:user_id>', methods=['POST'])
-@login_required
+@admin_required
 def delete_user(user_id):
-    if current_user.role != 'admin':
-        return jsonify({'status': 'error', 'message': 'Access denied'}), 403
     if user_id == current_user.id:
         return jsonify({'status': 'error', 'message': 'Cannot delete yourself'}), 400
     try:
@@ -909,7 +975,6 @@ def delete_client(client_id):
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
             output_file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.output_filename) if file.output_filename else None
             db.session.delete(file)
-            # Remove files from storage if they exist
             if os.path.exists(file_path):
                 os.remove(file_path)
                 logger.info(f"Removed file from storage: {file.filename}")
@@ -923,7 +988,6 @@ def delete_client(client_id):
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], leads_file.data_filename)
             output_file_path = os.path.join(app.config['UPLOAD_FOLDER'], leads_file.output_filename) if leads_file.output_filename else None
             db.session.delete(leads_file)
-            # Remove files from storage if they exist
             if os.path.exists(file_path):
                 os.remove(file_path)
                 logger.info(f"Removed leads file from storage: {leads_file.data_filename}")
@@ -943,8 +1007,7 @@ def delete_client(client_id):
         logger.error(f"Error deleting client {client_id} and associated data by user {current_user.username}: {str(e)}")
         db.session.rollback()
         return jsonify({'status': 'error', 'message': 'Error deleting client and associated data'}), 500
-    
-    
+
 @app.route('/upload', methods=['POST'])
 @login_required
 def upload():
@@ -1049,14 +1112,10 @@ def upload_data():
         db.session.commit()
         logger.info(f'Stored data file {filename} in database')
         return jsonify({'status': 'success', 'message': 'Data file uploaded successfully'})
-    except RequestEntityTooLarge:
-        logger.error('Upload failed: File too large')
-        return jsonify({'status': 'error', 'message': 'File too large. Maximum size is 100MB'}), 413
     except Exception as e:
-        logger.error(f'Error uploading data file: {str(e)}\n{traceback.format_exc()}')
+        logger.error(f'Error uploading data file: {str(e)}')
         db.session.rollback()
         return jsonify({'status': 'error', 'message': f'Error uploading data file: {str(e)}'}), 500
-    
 
 @app.route('/generate_leads', methods=['POST'])
 @login_required
@@ -1120,39 +1179,106 @@ def generate_leads_route():
         return jsonify({'status': 'error', 'message': 'Lead generation failed', 'metrics': metrics})
 
 @app.route('/download/<filename>')
-@login_required
 def download(filename):
-    file = File.query.filter_by(output_filename=filename).first()
-    leads_file = LeadsFile.query.filter_by(output_filename=filename).first() if not file else None
-    data_file = DataFile.query.filter_by(filename=filename).first() if not file and not leads_file else None
-    if file or leads_file or data_file:
-        client_id = file.client_id if file else leads_file.client_id if leads_file else None
-        if current_user.role == 'admin' or client_id is None:
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    if os.path.exists(file_path):
+        logger.info(f"Downloaded file: {filename}")
+        return send_file(file_path, as_attachment=True)
+    logger.warning(f"File download failed: {filename} not found")
+    return jsonify({'status': 'error', 'message': 'File not found'}), 404
+
+@app.route('/check')
+def check():
+    return render_template('check.html', csrf_token=generate_csrf())
+
+@app.route('/check_suppression', methods=['POST'])
+def check_suppression():
+    try:
+        name = request.form.get('name', '').strip()
+        email = request.form.get('email', '').strip()
+        files = request.files.getlist('files')
+
+        if not name or not email:
+            logger.warning("Missing name or email in suppression check")
+            return jsonify({'status': 'error', 'message': 'Name and email are required'}), 400
+
+        if not files:
+            logger.warning("No files provided for suppression check")
+            return jsonify({'status': 'error', 'message': 'No files selected'}), 400
+
+        # Validate email format
+        if not re.match(r'[^@]+@[^@]+\.[^@]+', email):
+            logger.warning(f"Invalid email format: {email}")
+            return jsonify({'status': 'error', 'message': 'Invalid email format'}), 400
+
+        # Save files temporarily
+        temp_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_check')
+        os.makedirs(temp_dir, exist_ok=True)
+        file_paths = []
+        for file in files:
+            if not allowed_file(file.filename):
+                logger.warning(f"Invalid file type: {file.filename}")
+                continue
+            filename = secure_filename(f"{uuid.uuid4()}_{file.filename}")
+            file_path = os.path.join(temp_dir, filename)
+            file.save(file_path)
+            file_paths.append(file_path)
+            logger.info(f"Saved temporary file: {filename}")
+
+        if not file_paths:
+            logger.error("No valid files uploaded for suppression check")
+            return jsonify({'status': 'error', 'message': 'No valid files uploaded'}), 400
+
+        # Process suppression (no prior numbers to suppress against)
+        suppression_number = int(datetime.datetime.now().timestamp())
+        output_filename, status, file_metrics, summary_metrics = process_suppression_check(file_paths, suppression_number)
+
+        # Clean up temporary files
+        for file_path in file_paths:
             if os.path.exists(file_path):
-                logger.info(f"User {current_user.username} downloaded file: {filename}")
-                return send_file(file_path, as_attachment=True)
-    logger.warning(f"File download failed for user {current_user.username}: {filename} not found or access denied")
-    return jsonify({'status': 'error', 'message': 'File not found or access denied'}), 404
+                os.remove(file_path)
+                logger.info(f"Removed temporary file: {file_path}")
+
+        if status == 'completed' and output_filename:
+            logger.info(f"Suppression check completed: {output_filename}")
+            return jsonify({
+                'status': 'success',
+                'message': 'Suppression check completed',
+                'output_filename': output_filename,
+                'metrics': file_metrics,
+                'summary_metrics': summary_metrics
+            })
+        else:
+            logger.error("Suppression check failed")
+            return jsonify({
+                'status': 'error',
+                'message': 'Suppression check failed',
+                'metrics': file_metrics,
+                'summary_metrics': summary_metrics
+            }), 500
+    except Exception as e:
+        logger.error(f"Error in check_suppression: {str(e)}")
+        return jsonify({'status': 'error', 'message': f'Error processing files: {str(e)}'}), 500
 
 @app.route('/delete_file/<int:file_id>', methods=['POST'])
-@login_required
+@admin_required
 def delete_file(file_id):
     try:
         file = File.query.get(file_id)
         if not file:
             logger.warning(f"File ID {file_id} not found for deletion by user {current_user.username}")
             return jsonify({'status': 'error', 'message': 'File not found'}), 404
-        if current_user.role != 'admin':
-            logger.warning(f"Access denied for user {current_user.username} to delete file ID {file_id}")
-            return jsonify({'status': 'error', 'message': 'Access denied'}), 403
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+        output_path = os.path.join(app.config['UPLOAD_FOLDER'], file.output_filename) if file.output_filename else None
         db.session.delete(file)
         db.session.commit()
-        logger.info(f"Deleted file with id {file_id}: {file.filename} by user {current_user.username}")
         if os.path.exists(file_path):
             os.remove(file_path)
             logger.info(f"Removed file from storage: {file.filename}")
+        if output_path and os.path.exists(output_path):
+            os.remove(output_path)
+            logger.info(f"Removed output file from storage: {file.output_filename}")
+        logger.info(f"Deleted file with id {file_id}: {file.filename} by user {current_user.username}")
         return jsonify({'status': 'success', 'message': 'File deleted successfully'})
     except Exception as e:
         logger.error(f"Error deleting file {file_id} by user {current_user.username}: {str(e)}")
