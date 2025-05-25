@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Suppression Check - International Lead Management</title>
+    <title>unique check</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
@@ -40,13 +40,16 @@
             width: 100%;
             overflow-x: auto;
         }
+        input[type="file"] {
+            display: none;
+        }
     </style>
 </head>
 <body class="bg-gray-100 font-sans">
     <!-- Header -->
     <header class="bg-blue-600 text-white p-3 shadow-md fixed top-0 left-0 right-0 z-10">
         <div class="container mx-auto flex justify-between items-center max-w-full">
-            <h1 class="text-lg font-bold">Suppression Check</h1>
+            <h1 class="text-lg font-bold"></h1>
             <div class="flex items-center space-x-2">
                 <a href="/login" class="bg-green-500 hover:bg-green-600 px-3 py-1.5 rounded text-sm">Login</a>
             </div>
@@ -61,16 +64,13 @@
             <form id="checkForm" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="mb-2">
-                    <label class="block text-sm font-medium mb-1">Your Name</label>
-                    <input type="text" name="name" class="w-full p-1.5 border rounded text-sm" required>
-                </div>
-                <div class="mb-2">
-                    <label class="block text-sm font-medium mb-1">Email</label>
-                    <input type="email" name="email" class="w-full p-1.5 border rounded text-sm" required>
-                </div>
-                <div class="mb-2">
                     <label class="block text-sm font-medium mb-1">Select Files (CSV/XLSX)</label>
-                    <input type="file" name="files" multiple accept=".csv,.xlsx" class="w-full p-1.5 border rounded text-sm" required>
+                    <p class="text-xs text-gray-500 mb-1">Files must contain a phone column (e.g., 'phone', 'phone number', 'mobile', 'contact'). <a href="/static/sample_phone_file.xlsx" class="text-blue-500 hover:underline">Download sample file</a></p>
+                    <input type="file" name="files" id="fileInput" multiple accept=".csv,.xlsx" required>
+                    <button type="button" id="selectFilesBtn" class="bg-gray-200 hover:bg-gray-300 px-3 py-1.5 rounded text-sm inline-flex items-center">
+                        <i class="fas fa-upload mr-2"></i> Choose Files
+                    </button>
+                    <span id="fileNames" class="text-sm text-gray-600 ml-2"></span>
                 </div>
                 <div class="flex justify-end">
                     <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Check Files</button>
@@ -103,9 +103,25 @@
                 return;
             }
 
+            // Trigger file input click when "Choose Files" button is clicked
+            $('#selectFilesBtn').on('click', function() {
+                $('#fileInput').click();
+            });
+
+            // Display selected file names
+            $('#fileInput').on('change', function() {
+                const files = this.files;
+                const fileNames = Array.from(files).map(file => file.name).join(', ');
+                $('#fileNames').text(fileNames || 'No files selected');
+            });
+
             // Handle form submission
             $('#checkForm').on('submit', function(e) {
                 e.preventDefault();
+                if (!this.files.value) {
+                    $('#checkStatus').text('Please select at least one file').addClass('text-red-600');
+                    return;
+                }
                 $('#loading').removeClass('hidden');
                 $('#checkStatus').text('').removeClass('text-red-600 text-green-600');
                 $('#summarySection').addClass('hidden');
@@ -123,40 +139,61 @@
                     success: function(response) {
                         $('#loading').addClass('hidden');
                         $('#checkStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
-                        if (response.status === 'success') {
-                            $('#summarySection').removeClass('hidden');
-                            $('#summaryContent').html(`
-                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    <div><strong>Total Phones Checked:</strong> ${response.summary_metrics.total_checked}</div>
-                                    <div><strong>Total Unique Phones Before Merge:</strong> ${response.summary_metrics.unique_before_merge}</div>
-                                    <div><strong>Total Unique Phones After Merge:</strong> ${response.summary_metrics.unique_after_merge}</div>
-                                    <div><strong>Duplicates Removed After Merge:</strong> ${response.summary_metrics.duplicates_removed}</div>
-                                </div>
-                                <h3 class="text-sm font-medium mt-3 mb-1.5">File Details</h3>
+                        $('#summarySection').removeClass('hidden');
+
+                        // Prepare summary content
+                        let summaryHtml = `
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div><strong>Total Phones Checked:</strong> ${response.summary_metrics.total_checked}</div>
+                                <div><strong>Total Unique Phones:</strong> ${response.summary_metrics.unique_after_merge}</div>
+                            </div>
+                            <h3 class="text-sm font-medium mt-3 mb-1.5">File Details</h3>
+                            <div class="table-container">
                                 <table class="w-full text-left text-sm">
                                     <thead>
                                         <tr class="bg-gray-200">
                                             <th class="p-1.5">File</th>
+                                            <th class="p-1.5">Phones</th>
                                             <th class="p-1.5">Unique Phones</th>
                                             <th class="p-1.5">Duplicate Phones</th>
+                                            <th class="p-1.5">Status</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        ${response.metrics.map((m, i) => `
-                                            <tr>
-                                                <td class="p-1.5">File ${i + 1}</td>
-                                                <td class="p-1.5 text-green-600">${m.unique_count}</td>
-                                                <td class="p-1.5 text-red-600">${m.duplicate_count}</td>
-                                            </tr>
-                                        `).join('')}
+                        `;
+
+                        response.metrics.forEach((m, i) => {
+                            const status = m.error ? 'Error' : 'Processed';
+                            const statusClass = m.error ? 'text-red-600' : 'text-green-600';
+                            summaryHtml += `
+                                <tr>
+                                    <td class="p-1.5">${m.filename}</td>
+                                    <td class="p-1.5">${m.phone_count}</td>
+                                    <td class="p-1.5 text-green-600">${m.unique_count}</td>
+                                    <td class="p-1.5 text-red-600">${m.duplicate_count}</td>
+                                    <td class="p-1.5 ${statusClass}">${m.error || status}</td>
+                                </tr>
+                            `;
+                        });
+
+                        summaryHtml += `
                                     </tbody>
                                 </table>
+                            </div>
+                        `;
+
+                        $('#summaryContent').html(summaryHtml);
+
+                        if (response.output_filename) {
+                            $('#downloadSection').html(`
+                                <a href="/download/${response.output_filename}" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium inline-flex items-center">
+                                    <i class="fas fa-download mr-2"></i> Download Unique Phones (${response.summary_metrics.unique_after_merge} numbers)
+                                </a>
                             `);
-                            if (response.output_filename) {
-                                $('#downloadSection').html(`
-                                    <a href="/download/${response.output_filename}" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Download Unique Phones</a>
-                                `);
-                            }
+                        } else {
+                            $('#downloadSection').html(`
+                                <p class="text-sm text-gray-600">No unique phones found to download.</p>
+                            `);
                         }
                     },
                     error: function(xhr) {
@@ -165,6 +202,45 @@
                         try {
                             const response = JSON.parse(xhr.responseText);
                             errorMsg = response.message || errorMsg;
+                            $('#summarySection').removeClass('hidden');
+                            let summaryHtml = `
+                                <div class="text-red-600">${response.message}</div>
+                                <h3 class="text-sm font-medium mt-3 mb-1.5">File Details</h3>
+                                <div class="table-container">
+                                    <table class="w-full text-left text-sm">
+                                        <thead>
+                                            <tr class="bg-gray-200">
+                                                <th class="p-1.5">File</th>
+                                                <th class="p-1.5">Phones</th>
+                                                <th class="p-1.5">Unique Phones</th>
+                                                <th class="p-1.5">Duplicate Phones</th>
+                                                <th class="p-1.5">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                            `;
+                            (response.metrics || []).forEach((m) => {
+                                const status = m.error ? 'Error' : 'Processed';
+                                const statusClass = m.error ? 'text-red-600' : 'text-green-600';
+                                summaryHtml += `
+                                    <tr>
+                                        <td class="p-1.5">${m.filename}</td>
+                                        <td class="p-1.5">${m.phone_count}</td>
+                                        <td class="p-1.5 text-green-600">${m.unique_count}</td>
+                                        <td class="p-1.5 text-red-600">${m.duplicate_count}</td>
+                                        <td class="p-1.5 ${statusClass}">${m.error || status}</td>
+                                    </tr>
+                                `;
+                            });
+                            summaryHtml += `
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `;
+                            $('#summaryContent').html(summaryHtml);
+                            $('#downloadSection').html(`
+                                <p class="text-sm text-gray-600">No unique phones found to download.</p>
+                            `);
                         } catch (e) {
                             console.error('Error parsing error response:', e);
                         }

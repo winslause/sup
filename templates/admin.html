@@ -8,59 +8,109 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
     <script src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        .modal { display: none; }
-        .modal.show { display: flex; }
-        .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .password-container { position: relative; }
-        .password-toggle { 
-            position: absolute; 
-            right: 10px; 
-            top: 50%; 
-            transform: translateY(-50%); 
-            cursor: pointer; 
-            width: 20px; 
+        .modal {
+            display: none;
+            transition: opacity 0.3s ease;
+        }
+        .modal.show {
+            display: flex;
+        }
+        .truncate {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .password-container {
+            position: relative;
+        }
+        .password-toggle {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            cursor: pointer;
+            width: 20px;
             height: 20px;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Ensure table cells wrap text on small screens */
+        @media (max-width: 640px) {
+            .truncate {
+                white-space: normal;
+                word-break: break-word;
+            }
+            th, td {
+                font-size: 0.75rem; /* Smaller text on mobile */
+                padding: 0.5rem;
+            }
+        }
+        /* Ensure modal fits small screens */
+        .modal-content {
+            width: 100%;
+            max-width: 28rem;
+            margin: 1rem;
         }
     </style>
 </head>
 <body class="bg-gray-100 font-sans">
     <!-- Header -->
-    <header class="bg-blue-600 text-white p-4 flex justify-between items-center">
-        <h1 class="text-xl font-semibold">Admin Portal</h1>
-        <div class="flex items-center space-x-4">
-            <span class="text-sm">Welcome, {{ current_user.full_name }}</span>
-            <button id="changePasswordBtn" class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1.5 rounded text-sm">Change Password</button>
-            <a href="{{ url_for('dashboard') }}" class="bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded text-sm">Dashboard</a>
-            <a href="{{ url_for('logout') }}" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded text-sm">Logout</a>
+    <header class="bg-blue-600 text-white p-4 shadow-md sticky top-0 z-20">
+        <div class="container mx-auto max-w-7xl flex justify-between items-center">
+            <h1 class="text-xl font-semibold sm:text-2xl">Admin Portal</h1>
+            <div class="flex items-center space-x-3 sm:space-x-4">
+                <span class="text-sm hidden sm:block">Welcome, {{ current_user.full_name }}</span>
+                <button id="changePasswordBtn" class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1.5 rounded text-sm">Change Password</button>
+                <a href="{{ url_for('dashboard') }}" class="bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded text-sm">Dashboard</a>
+                <a href="{{ url_for('logout') }}" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded text-sm">Logout</a>
+            </div>
         </div>
     </header>
 
     <!-- Main Content -->
-    <main class="container mx-auto p-4">
+    <main class="container mx-auto max-w-7xl p-4 sm:p-6">
         <!-- Users Section -->
-        <section class="bg-white p-4 rounded-lg shadow mb-4">
+        <section class="bg-white p-4 sm:p-6 rounded-lg shadow mb-6">
             <div class="flex justify-between items-center mb-4">
-                <h2 class="text-lg font-semibold">Users</h2>
-                <button id="addUserBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Add User</button>
+                <h2 class="text-lg font-semibold sm:text-xl">Users</h2>
+                <div class="flex space-x-3">
+                    <button id="toggleUsersBtn" class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm flex items-center">
+                        <i class="fas fa-eye-slash mr-2"></i> Hide
+                    </button>
+                    <button id="addUserBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Add User</button>
+                </div>
             </div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm">
+            <div id="usersTable" class="overflow-x-auto">
+                <table class="min-w-full text-sm">
                     <thead>
                         <tr class="bg-gray-200">
-                            <th class="p-2 text-left">Username</th>
-                            <th class="p-2 text-left">Full Name</th>
-                            <th class="p-2 text-left">Role</th>
-                            <th class="p-2 text-left">Actions</th>
+                            <th class="p-2 sm:p-3 text-left">Username</th>
+                            <th class="p-2 sm:p-3 text-left">Full Name</th>
+                            <th class="p-2 sm:p-3 text-left">Role</th>
+                            <th class="p-2 sm:p-3 text-left">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for user in users %}
                         <tr class="border-b">
-                            <td class="p-2 truncate">{{ user.username }}</td>
-                            <td class="p-2 truncate">{{ user.full_name }}</td>
-                            <td class="p-2">{{ user.role | capitalize }}</td>
-                            <td class="p-2 flex space-x-2">
+                            <td class="p-2 sm:p-3 truncate max-w-xs">{{ user.username }}</td>
+                            <td class="p-2 sm:p-3 truncate max-w-xs">{{ user.full_name }}</td>
+                            <td class="p-2 sm:p-3">{{ user.role | capitalize }}</td>
+                            <td class="p-2 sm:p-3 flex space-x-2">
                                 <button class="bg-yellow-500 hover:bg-yellow-600 text-white px-2 py-1 rounded text-xs edit-user-btn" data-id="{{ user.id }}" data-username="{{ user.username }}" data-fullname="{{ user.full_name }}" data-role="{{ user.role }}">Edit</button>
                                 {% if user.id != current_user.id %}
                                 <button class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs delete-user-btn" data-id="{{ user.id }}" data-username="{{ user.username }}">Delete</button>
@@ -69,7 +119,7 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="4" class="p-2 text-center">No users found</td>
+                            <td colspan="4" class="p-2 sm:p-3 text-center">No users found</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -78,217 +128,341 @@
         </section>
 
         <!-- Clients Section -->
-        <section class="bg-white p-4 rounded-lg shadow mb-4">
+        <section class="bg-white p-4 sm:p-6 rounded-lg shadow mb-6">
             <div class="flex justify-between items-center mb-4">
-                <h2 class="text-lg font-semibold">Clients</h2>
-                <button id="addClientBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Add Client</button>
+                <h2 class="text-lg font-semibold sm:text-xl">Clients</h2>
+                <div class="flex space-x-3">
+                    <button id="toggleClientsBtn" class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm flex items-center">
+                        <i class="fas fa-eye-slash mr-2"></i> Hide
+                    </button>
+                    <button id="addClientBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Add Client</button>
+                </div>
             </div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm">
+            <div id="clientsTable" class="overflow-x-auto">
+                <table class="min-w-full text-sm">
                     <thead>
                         <tr class="bg-gray-200">
-                            <th class="p-2 text-left">Name</th>
-                            <th class="p-2 text-left">Details</th>
-                            <th class="p-2 text-left">Actions</th>
+                            <th class="p-2 sm:p-3 text-left">Name</th>
+                            <th class="p-2 sm:p-3 text-left">Details</th>
+                            <th class="p-2 sm:p-3 text-left">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for client in clients %}
                         <tr class="border-b">
-                            <td class="p-2 truncate">{{ client.name }}</td>
-                            <td class="p-2 truncate">{{ client.details or 'No details' }}</td>
-                            <td class="p-2">
+                            <td class="p-2 sm:p-3 truncate max-w-xs">{{ client.name }}</td>
+                            <td class="p-2 sm:p-3 truncate max-w-md">{{ client.details or 'No details' }}</td>
+                            <td class="p-2 sm:p-3">
                                 <button class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs delete-client-btn" data-id="{{ client.id }}" data-name="{{ client.name }}">Delete</button>
                             </td>
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="3" class="p-2 text-center">No clients found</td>
+                            <td colspan="3" class="p-2 sm:p-3 text-center">No clients found</td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
         </section>
+
+        <!-- Master Files Section -->
+        <section class="bg-white p-4 sm:p-6 rounded-lg shadow mb-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold sm:text-xl">Master Files</h2>
+                <div class="flex space-x-3">
+                    <button id="toggleMasterFilesBtn" class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm flex items-center">
+                        <i class="fas fa-eye-slash mr-2"></i> Hide
+                    </button>
+                    <button id="uploadMasterBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Upload Master File</button>
+                </div>
+            </div>
+            <div id="masterFilesTable" class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead>
+                        <tr class="bg-gray-200">
+                            <th class="p-2 sm:p-3 text-left">Uploaded File</th>
+                            <th class="p-2 sm:p-3 text-left">Upload Date</th>
+                            <th class="p-2 sm:p-3 text-left">Unique Phones</th>
+                            <th class="p-2 sm:p-3 text-left">Master File</th>
+                            <th class="p-2 sm:p-3 text-left">Total Phones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for master_file in master_files %}
+                        <tr class="border-b">
+                            <td class="p-2 sm:p-3 truncate max-w-xs">
+                                <a href="{{ url_for('download', filename=master_file.filename) }}" class="text-blue-500 hover:underline">{{ master_file.filename }}</a>
+                            </td>
+                            <td class="p-2 sm:p-3">{{ master_file.upload_date }}</td>
+                            <td class="p-2 sm:p-3">{{ master_file.phone_count }}</td>
+                            <td class="p-2 sm:p-3 truncate max-w-xs">
+                                {% if master_file.master_filename %}
+                                <a href="{{ url_for('download', filename=master_file.master_filename) }}" class="text-blue-500 hover:underline">{{ master_file.master_filename }}</a>
+                                {% else %}
+                                N/A
+                                {% endif %}
+                            </td>
+                            <td class="p-2 sm:p-3">
+                                {% if master_file.master_filename %}
+                                {{ master_file.phone_count }}
+                                {% else %}
+                                0
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="5" class="p-2 sm:p-3 text-center">No master files uploaded</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Master Output Section -->
+        <section class="bg-white p-4 sm:p-6 rounded-lg shadow mb-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold sm:text-xl">Master Output</h2>
+                <button id="toggleMasterOutputBtn" class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm flex items-center">
+                    <i class="fas fa-eye-slash mr-2"></i> Hide
+                </button>
+            </div>
+            <div id="masterOutputTable" class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead>
+                        <tr class="bg-gray-200">
+                            <th class="p-2 sm:p-3 text-left">Master Output File</th>
+                            <th class="p-2 sm:p-3 text-left">Upload Date</th>
+                            <th class="p-2 sm:p-3 text-left">Unique Phones</th>
+                            <th class="p-2 sm:p-3 text-left">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if latest_master_output %}
+                        <tr class="border-b">
+                            <td class="p-2 sm:p-3 truncate max-w-xs">
+                                <a href="{{ url_for('download', filename=latest_master_output.master_filename) }}" class="text-blue-500 hover:underline">{{ latest_master_output.master_filename }}</a>
+                            </td>
+                            <td class="p-2 sm:p-3">{{ latest_master_output.upload_date }}</td>
+                            <td class="p-2 sm:p-3">{{ latest_master_output.phone_count }}</td>
+                            <td class="p-2 sm:p-3">
+                                <a href="{{ url_for('download', filename=latest_master_output.master_filename) }}" class="bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded text-xs">Download</a>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" class="p-2 sm:p-3 text-center">No master output file found</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Add User Modal -->
+        <div id="addUserModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+            <div class="modal-content bg-white p-4 sm:p-6 rounded-lg">
+                <h2 class="text-lg font-semibold mb-4">Add User</h2>
+                <form id="addUserForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-1">Username</label>
+                        <input type="text" name="username" class="w-full p-2 border rounded text-sm" required>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-1">Full Name</label>
+                        <input type="text" name="full_name" class="w-full p-2 border rounded text-sm" required>
+                    </div>
+                    <div class="mb-4 password-container">
+                        <label class="block text-sm font-medium mb-1">Password</label>
+                        <input type="password" name="password" class="w-full p-2 border rounded text-sm" required>
+                        <svg class="password-toggle" data-input="password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
+                            <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle class="eye" cx="12" cy="12" r="3" />
+                            <path class="eye-slash hidden" d="M3 3l18 18" />
+                        </svg>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-1">Role</label>
+                        <select name="role" class="w-full p-2 border rounded text-sm" required>
+                            <option value="user">User</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <div class="flex justify-end space-x-3">
+                        <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm" onclick="closeModal('addUserModal')">Cancel</button>
+                        <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Add User</button>
+                    </div>
+                </form>
+                <p id="addUserStatus" class="mt-3 text-sm"></p>
+            </div>
+        </div>
+
+        <!-- Edit User Modal -->
+        <div id="editUserModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+            <div class="modal-content bg-white p-4 sm:p-6 rounded-lg">
+                <h2 class="text-lg font-semibold mb-4">Edit User</h2>
+                <form id="editUserForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="user_id" id="editUserId">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-1">Username</label>
+                        <input type="text" name="username" id="editUsername" class="w-full p-2 border rounded text-sm" required>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-1">Full Name</label>
+                        <input type="text" name="full_name" id="editFullName" class="w-full p-2 border rounded text-sm" required>
+                    </div>
+                    <div class="mb-4 password-container">
+                        <label class="block text-sm font-medium mb-1">Password (Leave blank to keep unchanged)</label>
+                        <input type="password" name="password" id="editPassword" class="w-full p-2 border rounded text-sm">
+                        <svg class="password-toggle" data-input="password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
+                            <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle class="eye" cx="12" cy="12" r="3" />
+                            <path class="eye-slash hidden" d="M3 3l18 18" />
+                        </svg>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-1">Role</label>
+                        <select name="role" id="editRole" class="w-full p-2 border rounded text-sm" required>
+                            <option value="user">User</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <div class="flex justify-end space-x-3">
+                        <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm" onclick="closeModal('editUserModal')">Cancel</button>
+                        <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Update User</button>
+                    </div>
+                </form>
+                <p id="editUserStatus" class="mt-3 text-sm"></p>
+            </div>
+        </div>
+
+        <!-- Delete User Modal -->
+        <div id="deleteUserModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+            <div class="modal-content bg-white p-4 sm:p-6 rounded-lg">
+                <h2 class="text-lg font-semibold mb-4">Delete User</h2>
+                <p class="text-sm mb-4">Are you sure you want to delete user <span id="deleteUsername"></span>?</p>
+                <form id="deleteUserForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="user_id" id="deleteUserId">
+                    <div class="flex justify-end space-x-3">
+                        <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm" onclick="closeModal('deleteUserModal')">Cancel</button>
+                        <button type="submit" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded text-sm">Delete</button>
+                    </div>
+                </form>
+                <p id="deleteUserStatus" class="mt-3 text-sm"></p>
+            </div>
+        </div>
+
+        <!-- Delete Client Modal -->
+        <div id="deleteClientModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+            <div class="modal-content bg-white p-4 sm:p-6 rounded-lg">
+                <h2 class="text-lg font-semibold mb-4">Delete Client</h2>
+                <p class="text-sm mb-4">Are you sure you want to delete client <span id="deleteClientName"></span>?</p>
+                <form id="deleteClientForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="client_id" id="deleteClientId">
+                    <div class="flex justify-end space-x-3">
+                        <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm" onclick="closeModal('deleteClientModal')">Cancel</button>
+                        <button type="submit" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded text-sm">Delete</button>
+                    </div>
+                </form>
+                <p id="deleteClientStatus" class="mt-3 text-sm"></p>
+            </div>
+        </div>
+
+        <!-- Change Password Modal -->
+        <div id="changePasswordModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+            <div class="modal-content bg-white p-4 sm:p-6 rounded-lg">
+                <h2 class="text-lg font-semibold mb-4">Change Password</h2>
+                <form id="changePasswordForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="mb-4 password-container">
+                        <label class="block text-sm font-medium mb-1">Current Password</label>
+                        <input type="password" name="current_password" class="w-full p-2 border rounded text-sm" required>
+                        <svg class="password-toggle" data-input="current_password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
+                            <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle class="eye" cx="12" cy="12" r="3" />
+                            <path class="eye-slash hidden" d="M3 3l18 18" />
+                        </svg>
+                    </div>
+                    <div class="mb-4 password-container">
+                        <label class="block text-sm font-medium mb-1">New Password</label>
+                        <input type="password" name="new_password" class="w-full p-2 border rounded text-sm" required>
+                        <svg class="password-toggle" data-input="new_password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
+                            <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle class="eye" cx="12" cy="12" r="3" />
+                            <path class="eye-slash hidden" d="M3 3l18 18" />
+                        </svg>
+                    </div>
+                    <div class="mb-4 password-container">
+                        <label class="block text-sm font-medium mb-1">Confirm New Password</label>
+                        <input type="password" name="confirm_password" class="w-full p-2 border rounded text-sm" required>
+                        <svg class="password-toggle" data-input="confirm_password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
+                            <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle class="eye" cx="12" cy="12" r="3" />
+                            <path class="eye-slash hidden" d="M3 3l18 18" />
+                        </svg>
+                    </div>
+                    <div class="flex justify-end space-x-3">
+                        <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm" onclick="closeModal('changePasswordModal')">Cancel</button>
+                        <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Change Password</button>
+                    </div>
+                </form>
+                <p id="changePasswordStatus" class="mt-3 text-sm"></p>
+            </div>
+        </div>
+
+        <!-- Add Client Modal -->
+        <div id="addClientModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+            <div class="modal-content bg-white p-4 sm:p-6 rounded-lg">
+                <h2 class="text-lg font-semibold mb-4">Add Client</h2>
+                <form id="addClientForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-1">Client Name</label>
+                        <input type="text" name="name" class="w-full p-2 border rounded text-sm" required>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-1">Details</label>
+                        <textarea name="details" class="w-full p-2 border rounded text-sm"></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3">
+                        <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm" onclick="closeModal('addClientModal')">Cancel</button>
+                        <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Add Client</button>
+                    </div>
+                </form>
+                <p id="addClientStatus" class="mt-3 text-sm"></p>
+            </div>
+        </div>
+
+        <!-- Upload Master File Modal -->
+        <div id="uploadMasterModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
+            <div class="modal-content bg-white p-4 sm:p-6 rounded-lg">
+                <h2 class="text-lg font-semibold mb-4">Upload Master Files</h2>
+                <form id="uploadMasterForm" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-1">Select Files (CSV or Excel)</label>
+                        <input type="file" name="files" multiple accept=".csv,.xlsx" class="w-full p-2 border rounded text-sm" required>
+                        <p class="text-xs text-gray-500 mt-1">Files must contain a 'phone' or 'Phone' column with phone numbers.</p>
+                        <p id="fileNames" class="text-sm text-gray-600 mt-1"></p>
+                    </div>
+                    <div class="flex justify-end space-x-3">
+                        <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm" onclick="closeModal('uploadMasterModal')">Cancel</button>
+                        <button type="submit" id="uploadBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm flex items-center">
+                            <span>Upload</span>
+                            <span id="loader" class="loader hidden ml-2"></span>
+                        </button>
+                    </div>
+                </form>
+                <p id="uploadMasterStatus" class="mt-3 text-sm"></p>
+            </div>
+        </div>
     </main>
-
-    <!-- Add User Modal -->
-    <div id="addUserModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
-        <div class="bg-white p-3 rounded-lg w-full max-w-md">
-            <h2 class="text-base font-semibold mb-2">Add User</h2>
-            <form id="addUserForm">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div class="mb-2">
-                    <label class="block text-sm font-medium mb-1">Username</label>
-                    <input type="text" name="username" class="w-full p-1.5 border rounded text-sm" required>
-                </div>
-                <div class="mb-2">
-                    <label class="block text-sm font-medium mb-1">Full Name</label>
-                    <input type="text" name="full_name" class="w-full p-1.5 border rounded text-sm" required>
-                </div>
-                <div class="mb-2 password-container">
-                    <label class="block text-sm font-medium mb-1">Password</label>
-                    <input type="password" name="password" class="w-full p-1.5 border rounded text-sm" required>
-                    <svg class="password-toggle" data-input="password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
-                        <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle class="eye" cx="12" cy="12" r="3" />
-                        <path class="eye-slash hidden" d="M3 3l18 18" />
-                    </svg>
-                </div>
-                <div class="mb-2">
-                    <label class="block text-sm font-medium mb-1">Role</label>
-                    <select name="role" class="w-full p-1.5 border rounded text-sm" required>
-                        <option value="user">User</option>
-                        <option value="admin">Admin</option>
-                    </select>
-                </div>
-                <div class="flex justify-end">
-                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('addUserModal')">Cancel</button>
-                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Add User</button>
-                </div>
-            </form>
-            <p id="addUserStatus" class="mt-2 text-sm"></p>
-        </div>
-    </div>
-
-    <!-- Edit User Modal -->
-    <div id="editUserModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
-        <div class="bg-white p-3 rounded-lg w-full max-w-md">
-            <h2 class="text-base font-semibold mb-2">Edit User</h2>
-            <form id="editUserForm">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="user_id" id="editUserId">
-                <div class="mb-2">
-                    <label class="block text-sm font-medium mb-1">Username</label>
-                    <input type="text" name="username" id="editUsername" class="w-full p-1.5 border rounded text-sm" required>
-                </div>
-                <div class="mb-2">
-                    <label class="block text-sm font-medium mb-1">Full Name</label>
-                    <input type="text" name="full_name" id="editFullName" class="w-full p-1.5 border rounded text-sm" required>
-                </div>
-                <div class="mb-2 password-container">
-                    <label class="block text-sm font-medium mb-1">Password (Leave blank to keep unchanged)</label>
-                    <input type="password" name="password" id="editPassword" class="w-full p-1.5 border rounded text-sm">
-                    <svg class="password-toggle" data-input="password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
-                        <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle class="eye" cx="12" cy="12" r="3" />
-                        <path class="eye-slash hidden" d="M3 3l18 18" />
-                    </svg>
-                </div>
-                <div class="mb-2">
-                    <label class="block text-sm font-medium mb-1">Role</label>
-                    <select name="role" id="editRole" class="w-full p-1.5 border rounded text-sm" required>
-                        <option value="user">User</option>
-                        <option value="admin">Admin</option>
-                    </select>
-                </div>
-                <div class="flex justify-end">
-                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('editUserModal')">Cancel</button>
-                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Update User</button>
-                </div>
-            </form>
-            <p id="editUserStatus" class="mt-2 text-sm"></p>
-        </div>
-    </div>
-
-    <!-- Delete User Modal -->
-    <div id="deleteUserModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
-        <div class="bg-white p-3 rounded-lg w-full max-w-md">
-            <h2 class="text-base font-semibold mb-2">Delete User</h2>
-            <p class="text-sm mb-2">Are you sure you want to delete user <span id="deleteUsername"></span>?</p>
-            <form id="deleteUserForm">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="user_id" id="deleteUserId">
-                <div class="flex justify-end">
-                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('deleteUserModal')">Cancel</button>
-                    <button type="submit" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded text-sm">Delete</button>
-                </div>
-            </form>
-            <p id="deleteUserStatus" class="mt-2 text-sm"></p>
-        </div>
-    </div>
-
-    <!-- Delete Client Modal -->
-    <div id="deleteClientModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
-        <div class="bg-white p-3 rounded-lg w-full max-w-md">
-            <h2 class="text-base font-semibold mb-2">Delete Client</h2>
-            <p class="text-sm mb-2">Are you sure you want to delete client <span id="deleteClientName"></span>?</p>
-            <form id="deleteClientForm">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="client_id" id="deleteClientId">
-                <div class="flex justify-end">
-                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('deleteClientModal')">Cancel</button>
-                    <button type="submit" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded text-sm">Delete</button>
-                </div>
-            </form>
-            <p id="deleteClientStatus" class="mt-2 text-sm"></p>
-        </div>
-    </div>
-
-    <!-- Change Password Modal -->
-    <div id="changePasswordModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
-        <div class="bg-white p-3 rounded-lg w-full max-w-md">
-            <h2 class="text-base font-semibold mb-2">Change Password</h2>
-            <form id="changePasswordForm">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div class="mb-2 password-container">
-                    <label class="block text-sm font-medium mb-1">Current Password</label>
-                    <input type="password" name="current_password" class="w-full p-1.5 border rounded text-sm" required>
-                    <svg class="password-toggle" data-input="current_password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
-                        <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle class="eye" cx="12" cy="12" r="3" />
-                        <path class="eye-slash hidden" d="M3 3l18 18" />
-                    </svg>
-                </div>
-                <div class="mb-2 password-container">
-                    <label class="block text-sm font-medium mb-1">New Password</label>
-                    <input type="password" name="new_password" class="w-full p-1.5 border rounded text-sm" required>
-                    <svg class="password-toggle" data-input="new_password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
-                        <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle class="eye" cx="12" cy="12" r="3" />
-                        <path class="eye-slash hidden" d="M3 3l18 18" />
-                    </svg>
-                </div>
-                <div class="mb-2 password-container">
-                    <label class="block text-sm font-medium mb-1">Confirm New Password</label>
-                    <input type="password" name="confirm_password" class="w-full p-1.5 border rounded text-sm" required>
-                    <svg class="password-toggle" data-input="confirm_password" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-label="Toggle password visibility">
-                        <path class="eye" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle class="eye" cx="12" cy="12" r="3" />
-                        <path class="eye-slash hidden" d="M3 3l18 18" />
-                    </svg>
-                </div>
-                <div class="flex justify-end">
-                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('changePasswordModal')">Cancel</button>
-                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Change Password</button>
-                </div>
-            </form>
-            <p id="changePasswordStatus" class="mt-2 text-sm"></p>
-        </div>
-    </div>
-
-    <!-- Add Client Modal -->
-    <div id="addClientModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center modal z-30">
-        <div class="bg-white p-3 rounded-lg w-full max-w-md">
-            <h2 class="text-base font-semibold mb-2">Add Client</h2>
-            <form id="addClientForm">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div class="mb-2">
-                    <label class="block text-sm font-medium mb-1">Client Name</label>
-                    <input type="text" name="name" class="w-full p-1.5 border rounded text-sm" required>
-                </div>
-                <div class="mb-2">
-                    <label class="block text-sm font-medium mb-1">Details</label>
-                    <textarea name="details" class="w-full p-1.5 border rounded text-sm"></textarea>
-                </div>
-                <div class="flex justify-end">
-                    <button type="button" class="bg-gray-300 hover:bg-gray-400 px-3 py-1.5 rounded text-sm mr-2" onclick="closeModal('addClientModal')">Cancel</button>
-                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Add Client</button>
-                </div>
-            </form>
-            <p id="addClientStatus" class="mt-2 text-sm"></p>
-        </div>
-    </div>
 
     <!-- JavaScript -->
     <script>
@@ -301,6 +475,8 @@
             $(`#${modalId}`).removeClass('show');
             $(`#${modalId} form`)[0].reset();
             $(`#${modalId} .text-red-600, #${modalId} .text-green-600`).text('').removeClass('text-red-600 text-green-600');
+            $(`#${modalId} #fileNames`).text('');
+            $(`#${modalId} #loader`).addClass('hidden');
             // Reset password visibility
             $('.password-toggle').each(function() {
                 const input = $(`input[name="${$(this).data('input')}"]`);
@@ -320,13 +496,37 @@
             $(this).find('.eye-slash').toggleClass('hidden', isPassword);
         });
 
+        // Toggle Table Visibility
+        function toggleTable(buttonId, tableId) {
+            $(`#${buttonId}`).on('click', function() {
+                const $table = $(`#${tableId}`);
+                const isHidden = $table.hasClass('hidden');
+                $table.toggleClass('hidden');
+                $(this).html(isHidden ? 
+                    `<i class="fas fa-eye-slash mr-2"></i> Hide` : 
+                    `<i class="fas fa-eye mr-2"></i> Show`
+                );
+            });
+        }
+
+        toggleTable('toggleUsersBtn', 'usersTable');
+        toggleTable('toggleClientsBtn', 'clientsTable');
+        toggleTable('toggleMasterFilesBtn', 'masterFilesTable');
+        toggleTable('toggleMasterOutputBtn', 'masterOutputTable');
+
+        // Display selected file names
+        $('#uploadMasterForm input[name="files"]').on('change', function() {
+            const files = this.files;
+            const fileNames = Array.from(files).map(file => file.name).join(', ');
+            $('#fileNames').text(fileNames || 'No files selected');
+        });
+
         // Add User
         $('#addUserBtn').on('click', () => openModal('addUserModal'));
 
         $('#addUserForm').on('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
-            console.log('Submitting form with CSRF token:', formData.get('csrf_token')); // Log CSRF token
             $.ajax({
                 url: '/add_user',
                 type: 'POST',
@@ -335,30 +535,36 @@
                 contentType: false,
                 headers: {'X-CSRF-Token': formData.get('csrf_token')},
                 success: function(response) {
-                    console.log('Add user response:', response);
                     $('#addUserStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    Toastify({
+                        text: response.message,
+                        duration: response.status === 'success' ? 2000 : 3000,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: response.status === 'success' ? "#4CAF50" : "#F44336",
+                        stopOnFocus: true
+                    }).showToast();
                     if (response.status === 'success') {
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 1000);
+                        setTimeout(() => window.location.reload(), 2000);
                     }
                 },
-                error: function(xhr, status, error) {
-                    console.error('Add user error:', {
-                        status: xhr.status,
-                        responseText: xhr.responseText,
-                        error: error
-                    });
+                error: function(xhr) {
                     let errorMessage = 'Error adding user';
                     try {
                         const response = JSON.parse(xhr.responseText);
-                        if (response.message) {
-                            errorMessage = response.message;
-                        }
+                        errorMessage = response.message || errorMessage;
                     } catch (e) {
-                        errorMessage = xhr.responseText || 'Error adding user';
+                        errorMessage = xhr.responseText || errorMessage;
                     }
                     $('#addUserStatus').text(errorMessage).addClass('text-red-600');
+                    Toastify({
+                        text: errorMessage,
+                        duration: 3000,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: "#F44336",
+                        stopOnFocus: true
+                    }).showToast();
                 }
             });
         });
@@ -389,14 +595,35 @@
                 headers: {'X-CSRF-Token': formData.get('csrf_token')},
                 success: function(response) {
                     $('#editUserStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    Toastify({
+                        text: response.message,
+                        duration: response.status === 'success' ? 2000 : 3000,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: response.status === 'success' ? "#4CAF50" : "#F44336",
+                        stopOnFocus: true
+                    }).showToast();
                     if (response.status === 'success') {
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 1000);
+                        setTimeout(() => window.location.reload(), 2000);
                     }
                 },
                 error: function(xhr) {
-                    $('#editUserStatus').text('Error updating user').addClass('text-red-600');
+                    let errorMessage = 'Error updating user';
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        errorMessage = response.message || errorMessage;
+                    } catch (e) {
+                        errorMessage = xhr.responseText || errorMessage;
+                    }
+                    $('#editUserStatus').text(errorMessage).addClass('text-red-600');
+                    Toastify({
+                        text: errorMessage,
+                        duration: 3000,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: "#F44336",
+                        stopOnFocus: true
+                    }).showToast();
                 }
             });
         });
@@ -423,14 +650,35 @@
                 headers: {'X-CSRF-Token': formData.get('csrf_token')},
                 success: function(response) {
                     $('#deleteUserStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    Toastify({
+                        text: response.message,
+                        duration: response.status === 'success' ? 2000 : 3000,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: response.status === 'success' ? "#4CAF50" : "#F44336",
+                        stopOnFocus: true
+                    }).showToast();
                     if (response.status === 'success') {
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 1000);
+                        setTimeout(() => window.location.reload(), 2000);
                     }
                 },
                 error: function(xhr) {
-                    $('#deleteUserStatus').text('Error deleting user').addClass('text-red-600');
+                    let errorMessage = 'Error deleting user';
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        errorMessage = response.message || errorMessage;
+                    } catch (e) {
+                        errorMessage = xhr.responseText || errorMessage;
+                    }
+                    $('#deleteUserStatus').text(errorMessage).addClass('text-red-600');
+                    Toastify({
+                        text: errorMessage,
+                        duration: 3000,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: "#F44336",
+                        stopOnFocus: true
+                    }).showToast();
                 }
             });
         });
@@ -450,23 +698,35 @@
                 headers: {'X-CSRF-Token': formData.get('csrf_token')},
                 success: function(response) {
                     $('#addClientStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    Toastify({
+                        text: response.message,
+                        duration: response.status === 'success' ? 2000 : 3000,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: response.status === 'success' ? "#4CAF50" : "#F44336",
+                        stopOnFocus: true
+                    }).showToast();
                     if (response.status === 'success') {
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 1000);
+                        setTimeout(() => window.location.reload(), 2000);
                     }
                 },
                 error: function(xhr) {
                     let errorMessage = 'Error adding client';
                     try {
                         const response = JSON.parse(xhr.responseText);
-                        if (response.message) {
-                            errorMessage = response.message;
-                        }
+                        errorMessage = response.message || errorMessage;
                     } catch (e) {
-                        errorMessage = xhr.responseText || 'Error adding client';
+                        errorMessage = xhr.responseText || errorMessage;
                     }
                     $('#addClientStatus').text(errorMessage).addClass('text-red-600');
+                    Toastify({
+                        text: errorMessage,
+                        duration: 3000,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: "#F44336",
+                        stopOnFocus: true
+                    }).showToast();
                 }
             });
         });
@@ -493,43 +753,27 @@
                 headers: {'X-CSRF-Token': formData.get('csrf_token')},
                 success: function(response) {
                     $('#deleteClientStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    Toastify({
+                        text: response.message,
+                        duration: response.status === 'success' ? 2000 : 3000,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: response.status === 'success' ? "#4CAF50" : "#F44336",
+                        stopOnFocus: true
+                    }).showToast();
                     if (response.status === 'success') {
-                        // Show Toastify success message
-                        Toastify({
-                            text: response.message || "Client deleted successfully!",
-                            duration: 2000,
-                            gravity: "top",
-                            position: "right",
-                            backgroundColor: "#4CAF50",
-                            stopOnFocus: true
-                        }).showToast();
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 2000); // Reload after 2 seconds to allow toast visibility
-                    } else {
-                        // Show Toastify error message
-                        Toastify({
-                            text: response.message || "Error deleting client",
-                            duration: 3000,
-                            gravity: "top",
-                            position: "right",
-                            backgroundColor: "#F44336",
-                            stopOnFocus: true
-                        }).showToast();
+                        setTimeout(() => window.location.reload(), 2000);
                     }
                 },
                 error: function(xhr) {
                     let errorMessage = 'Error deleting client';
                     try {
                         const response = JSON.parse(xhr.responseText);
-                        if (response.message) {
-                            errorMessage = response.message;
-                        }
+                        errorMessage = response.message || errorMessage;
                     } catch (e) {
-                        errorMessage = xhr.responseText || 'Error deleting client';
+                        errorMessage = xhr.responseText || errorMessage;
                     }
                     $('#deleteClientStatus').text(errorMessage).addClass('text-red-600');
-                    // Show Toastify error message
                     Toastify({
                         text: errorMessage,
                         duration: 3000,
@@ -557,18 +801,112 @@
                 headers: {'X-CSRF-Token': formData.get('csrf_token')},
                 success: function(response) {
                     $('#changePasswordStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    Toastify({
+                        text: response.message,
+                        duration: response.status === 'success' ? 2000 : 3000,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: response.status === 'success' ? "#4CAF50" : "#F44336",
+                        stopOnFocus: true
+                    }).showToast();
                     if (response.status === 'success') {
-                        setTimeout(() => {
-                            closeModal('changePasswordModal');
-                        }, 1000);
+                        setTimeout(() => closeModal('changePasswordModal'), 2000);
                     }
                 },
                 error: function(xhr) {
-                    $('#changePasswordStatus').text('Error changing password').addClass('text-red-600');
+                    let errorMessage = 'Error changing password';
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        errorMessage = response.message || errorMessage;
+                    } catch (e) {
+                        errorMessage = xhr.responseText || errorMessage;
+                    }
+                    $('#changePasswordStatus').text(errorMessage).addClass('text-red-600');
+                    Toastify({
+                        text: errorMessage,
+                        duration: 3000,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: "#F44336",
+                        stopOnFocus: true
+                    }).showToast();
+                }
+            });
+        });
+
+        // Upload Master File
+        $('#uploadMasterBtn').on('click', () => openModal('uploadMasterModal'));
+
+        $('#uploadMasterForm').on('submit', function(e) {
+            e.preventDefault();
+            const fileInput = this.files;
+            if (!fileInput.files.length) {
+                $('#uploadMasterStatus').text('Please select at least one file').addClass('text-red-600');
+                Toastify({
+                    text: 'Please select at least one file',
+                    duration: 3000,
+                    gravity: "top",
+                    position: "right",
+                    backgroundColor: "#F44336",
+                    stopOnFocus: true
+                }).showToast();
+                return;
+            }
+
+            // Show loader and disable upload button
+            $('#loader').removeClass('hidden');
+            $('#uploadBtn').prop('disabled', true).find('span:first').text('Uploading...');
+            $('#uploadMasterStatus').text('Processing files, please wait...').removeClass('text-red-600 text-green-600');
+
+            const formData = new FormData(this);
+            $.ajax({
+                url: '/upload_master',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                success: function(response) {
+                    $('#loader').addClass('hidden');
+                    $('#uploadBtn').prop('disabled', false).find('span:first').text('Upload');
+                    $('#uploadMasterStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    Toastify({
+                        text: response.message,
+                        duration: response.status === 'success' ? 2000 : 3000,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: response.status === 'success' ? "#4CAF50" : "#F44336",
+                        stopOnFocus: true
+                    }).showToast();
+                    if (response.status === 'success') {
+                        setTimeout(() => {
+                            closeModal('uploadMasterModal');
+                            window.location.reload();
+                        }, 2000);
+                    }
+                },
+                error: function(xhr) {
+                    $('#loader').addClass('hidden');
+                    $('#uploadBtn').prop('disabled', false).find('span:first').text('Upload');
+                    let errorMessage = 'Error uploading master files';
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        errorMessage = response.message || errorMessage;
+                    } catch (e) {
+                        errorMessage = xhr.responseText || errorMessage;
+                    }
+                    $('#uploadMasterStatus').text(errorMessage).addClass('text-red-600');
+                    Toastify({
+                        text: errorMessage,
+                        duration: 3000,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: "#F44336",
+                        stopOnFocus: true
+                    }).showToast();
                 }
             });
         });
     </script>
 </body>
 </html>
-<!-- the site has refused -->

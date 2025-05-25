@@ -12,7 +12,6 @@ import logging
 import re
 import json
 import bcrypt
-import uuid
 from typing import Tuple, Optional, Set, Dict, List
 from pandas import ExcelWriter
 from functools import wraps
@@ -107,12 +106,22 @@ class LeadsFile(db.Model):
     lead_quantity = db.Column(db.Integer)
     custom_filters = db.Column(db.Text)
 
+class MasterFile(db.Model):
+    __tablename__ = 'master_files'
+    id = db.Column(db.Integer, primary_key=True)
+    filename = db.Column(db.String(255), nullable=False)
+    upload_date = db.Column(db.String(50))
+    phone_count = db.Column(db.Integer, default=0)
+    master_filename = db.Column(db.String(255))  # Tracks the merged master file
+    
+    
 class DataFile(db.Model):
     __tablename__ = 'data_files'
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.String(255), nullable=False)
-    upload_date = db.Column(db.String(50))
-
+    upload_date = db.Column(db.String(50), nullable=False)
+    
+    
 # Initialize database
 def init_db():
     with app.app_context():
@@ -188,6 +197,293 @@ def batch_insert_unique_phones(client_id: int, unique_phones: List[str]):
         db.session.commit()
         logger.info(f"Inserted batch of {len(batch)} phones for client {client_id}")
 
+def clean_phone(phone: str) -> str:
+    if pd.isna(phone):
+        return ''
+    return re.sub(r'\D', '', str(phone)).strip()
+
+def is_valid_phone(phone: str) -> bool:
+    return bool(phone and 7 <= len(phone) <= 15)
+
+def process_master_file(file_path: str, filename: str, master_phones: Optional[set] = None, prev_master_path: Optional[str] = None) -> Tuple[Optional[str], str, Dict[str, any]]:
+    try:
+        # Load the new file
+        if file_path.endswith('.csv'):
+            try:
+                chunks = pd.read_csv(file_path, chunksize=10000, usecols=lambda x: x.lower() in ['phone'], dtype=str)
+                df_chunks = []
+                for chunk in chunks:
+                    df_chunks.append(chunk)
+                df = pd.concat(df_chunks, ignore_index=True) if df_chunks else pd.DataFrame()
+            except ValueError:
+                logger.error(f"No 'phone' or 'Phone' column in {filename}")
+                return None, 'failed', {
+                    'phone_count': 0,
+                    'unique_count': 0,
+                    'duplicate_count': 0,
+                    'master_phone_count': 0,
+                    'error': "File must contain a 'phone' or 'Phone' column"
+                }
+        else:
+            try:
+                df = pd.read_excel(file_path, engine='openpyxl', usecols=lambda x: x.lower() in ['phone'], dtype=str)
+                if df.empty:
+                    df = pd.DataFrame()
+            except ValueError:
+                logger.error(f"No 'phone' or 'Phone' column in {filename}")
+                return None, 'failed', {
+                    'phone_count': 0,
+                    'unique_count': 0,
+                    'duplicate_count': 0,
+                    'master_phone_count': 0,
+                    'error': "File must contain a 'phone' or 'Phone' column"
+                }
+        logger.info(f"Loaded new file: {filename} with {len(df)} rows")
+
+        # Identify phone column
+        phone_col = None
+        for col in df.columns:
+            if col.lower() == 'phone':
+                phone_col = col
+                break
+        if not phone_col:
+            logger.error(f"No 'phone' or 'Phone' column in {filename}")
+            return None, 'failed', {
+                'phone_count': 0,
+                'unique_count': 0,
+                'duplicate_count': 0,
+                'master_phone_count': 0,
+                'error': "File must contain a 'phone' or 'Phone' column"
+            }
+
+        # Clean and validate phones
+        df['cleaned_phone'] = df[phone_col].apply(clean_phone)
+        df['is_valid'] = df['cleaned_phone'].apply(is_valid_phone)
+        valid_df = df[df['is_valid']][['cleaned_phone']].copy()
+        total_phones = len(valid_df)
+        if valid_df.empty:
+            logger.error(f"No valid phone numbers in {filename}")
+            return None, 'failed', {
+                'phone_count': total_phones,
+                'unique_count': 0,
+                'duplicate_count': 0,
+                'master_phone_count': 0,
+                'error': "No valid phone numbers found in the file"
+            }
+
+        # Deduplicate within the new file
+        valid_df = valid_df.drop_duplicates(subset='cleaned_phone')
+        unique_count = len(valid_df)
+        logger.info(f"New file after deduplication: {unique_count} unique phones")
+
+        # Initialize master phones
+        current_master_phones = set(master_phones) if master_phones else set()
+        master_phone_count = len(current_master_phones)
+
+        # Load the previous master file if provided
+        if prev_master_path and os.path.exists(prev_master_path):
+            try:
+                if prev_master_path.endswith('.csv'):
+                    master_df = pd.read_csv(prev_master_path, usecols=['phone'], dtype=str)
+                else:
+                    master_df = pd.read_excel(prev_master_path, engine='openpyxl', usecols=['phone'], dtype=str)
+                master_df['cleaned_phone'] = master_df['phone'].apply(clean_phone)
+                current_master_phones.update(master_df['cleaned_phone'].dropna())
+                master_phone_count = len(current_master_phones)
+                logger.info(f"Loaded previous master file {prev_master_path} with {master_phone_count} phones")
+            except Exception as e:
+                logger.error(f"Error loading previous master file {prev_master_path}: {str(e)}")
+                return None, 'failed', {
+                    'phone_count': total_phones,
+                    'unique_count': 0,
+                    'duplicate_count': 0,
+                    'master_phone_count': 0,
+                    'error': f"Error loading previous master file: {str(e)}"
+                }
+
+        # Check for duplicates against master phones
+        valid_df['is_unique'] = valid_df['cleaned_phone'].apply(lambda x: x not in current_master_phones)
+        unique_df = valid_df[valid_df['is_unique']][['cleaned_phone']]
+        new_unique_count = len(unique_df)
+        duplicate_count = unique_count - new_unique_count
+        logger.info(f"After checking against master: {new_unique_count} new uniques, {duplicate_count} duplicates")
+
+        # Update master phones with new uniques
+        current_master_phones.update(unique_df['cleaned_phone'])
+        master_df = pd.DataFrame(list(current_master_phones), columns=['phone'])
+        master_phone_count = len(master_df)
+
+        if master_df.empty:
+            logger.error(f"Combined phone list is empty for {filename}")
+            return None, 'failed', {
+                'phone_count': total_phones,
+                'unique_count': new_unique_count,
+                'duplicate_count': duplicate_count,
+                'master_phone_count': 0,
+                'error': "Combined phone list is empty"
+            }
+
+        # Save new master file (Excel or CSV based on row count)
+        master_filename = f"master_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        master_path = os.path.join(app.config['UPLOAD_FOLDER'], master_filename)
+        max_excel_rows = 1048576
+        max_file_size = 150 * 1024 * 1024  # 150MB in bytes
+
+        try:
+            if master_phone_count > max_excel_rows:
+                master_filename += '.csv'
+                master_path += '.csv'
+                master_df.to_csv(master_path, index=False)
+                logger.info(f"Saved new master file as CSV: {master_filename} with {master_phone_count} phones")
+            else:
+                master_filename += '.xlsx'
+                master_path += '.xlsx'
+                master_df.to_excel(master_path, index=False, sheet_name='Phones', engine='openpyxl')
+                logger.info(f"Saved new master file as Excel: {master_filename} with {master_phone_count} phones")
+
+            # Check file size
+            file_size = os.path.getsize(master_path)
+            if file_size > max_file_size:
+                logger.error(f"Master file {master_filename} exceeds 150MB limit: {file_size} bytes")
+                os.remove(master_path)
+                return None, 'failed', {
+                    'phone_count': total_phones,
+                    'unique_count': new_unique_count,
+                    'duplicate_count': duplicate_count,
+                    'master_phone_count': master_phone_count,
+                    'error': f"Master file exceeds 150MB limit: {file_size} bytes"
+                }
+
+        except Exception as e:
+            logger.error(f"Error saving new master file {master_filename}: {str(e)}")
+            return None, 'failed', {
+                'phone_count': total_phones,
+                'unique_count': new_unique_count,
+                'duplicate_count': duplicate_count,
+                'master_phone_count': master_phone_count,
+                'error': f"Error saving new master file: {str(e)}"
+            }
+
+        return master_filename, 'completed', {
+            'phone_count': total_phones,
+            'unique_count': new_unique_count,
+            'duplicate_count': duplicate_count,
+            'master_phone_count': master_phone_count,
+            'new_master_phones': current_master_phones  # Return updated master phones for next file
+        }
+
+    except Exception as e:
+        logger.error(f"Error processing master file {filename}: {str(e)}")
+        return None, 'failed', {
+            'phone_count': 0,
+            'unique_count': 0,
+            'duplicate_count': 0,
+            'master_phone_count': 0,
+            'error': f"Error processing file: {str(e)}"
+        }
+
+def check_against_master(file_paths: List[str]) -> Tuple[Optional[str], str, List[Dict[str, int]], Dict[str, int]]:
+    try:
+        input_dfs = []
+        total_checked = 0
+        file_metrics = []
+
+        # Load input files
+        for idx, file_path in enumerate(file_paths):
+            try:
+                if file_path.endswith('.csv'):
+                    chunks = pd.read_csv(file_path, chunksize=10000, usecols=['phone', 'Phone'], dtype=str)
+                    df = pd.concat(chunks, ignore_index=True)
+                else:
+                    df = pd.read_excel(file_path, engine='openpyxl', usecols=['phone', 'Phone'], dtype=str)
+                input_dfs.append(df)
+                logger.info(f"Loaded seller file {idx + 1}: {file_path} with {len(df)} rows")
+            except Exception as e:
+                logger.warning(f"Skipping seller file {file_path}: {str(e)}")
+                input_dfs.append(pd.DataFrame())
+                file_metrics.append({'unique_count': 0, 'duplicate_count': 0})
+                continue
+
+        if not any(not df.empty for df in input_dfs):
+            logger.error("No valid seller files to process")
+            return None, 'failed', [{'unique_count': 0, 'duplicate_count': 0}] * len(file_paths), {'total_checked': 0}
+
+        # Load the latest master file
+        latest_master = MasterFile.query.order_by(MasterFile.upload_date.desc()).first()
+        master_phones = set()
+        if latest_master and latest_master.master_filename:
+            master_path = os.path.join(app.config['UPLOAD_FOLDER'], latest_master.master_filename)
+            if os.path.exists(master_path):
+                if master_path.endswith('.csv'):
+                    master_df = pd.read_csv(master_path, usecols=['phone'], dtype=str)
+                else:
+                    master_df = pd.read_excel(master_path, engine='openpyxl', usecols=['phone'], dtype=str)
+                master_df['cleaned_phone'] = master_df['phone'].apply(clean_phone)
+                master_phones = set(master_df['cleaned_phone'].dropna())
+                logger.info(f"Loaded master file {latest_master.master_filename} with {len(master_phones)} phones")
+        else:
+            logger.info("No master file available; treating all phones as unique")
+            # If no master file, all valid phones are considered unique
+
+        # Process each input file
+        output_dfs = []
+        for idx, df in enumerate(input_dfs):
+            if df.empty:
+                file_metrics.append({'unique_count': 0, 'duplicate_count': 0})
+                continue
+
+            phone_col = None
+            for col in df.columns:
+                if col.lower() == 'phone':
+                    phone_col = col
+                    break
+            if not phone_col:
+                logger.warning(f"Seller file {idx + 1}: Skipped - No 'phone' or 'Phone' column")
+                file_metrics.append({'unique_count': 0, 'duplicate_count': 0})
+                continue
+
+            df['cleaned_phone'] = df[phone_col].apply(clean_phone)
+            df['is_valid'] = df['cleaned_phone'].apply(is_valid_phone)
+            valid_df = df[df['is_valid']][['cleaned_phone', phone_col]].copy()
+            total_checked += len(valid_df)
+            if valid_df.empty:
+                logger.warning(f"Seller file {idx + 1}: Skipped - No valid phone numbers")
+                file_metrics.append({'unique_count': 0, 'duplicate_count': 0})
+                continue
+
+            # Deduplicate within the file
+            valid_df = valid_df.drop_duplicates(subset='cleaned_phone')
+            unique_count = len(valid_df)
+            valid_df['is_unique'] = valid_df['cleaned_phone'].apply(lambda x: x not in master_phones)
+            unique_df = valid_df[valid_df['is_unique']][[phone_col]].rename(columns={phone_col: 'phone'})
+            new_unique_count = len(unique_df)
+            duplicate_count = unique_count - new_unique_count
+            file_metrics.append({'unique_count': new_unique_count, 'duplicate_count': duplicate_count})
+            output_dfs.append(unique_df)
+            logger.info(f"Seller file {idx + 1}: {new_unique_count} uniques, {duplicate_count} duplicates")
+
+        if not output_dfs:
+            logger.error("No unique phones found in any seller file")
+            return None, 'failed', file_metrics, {'total_checked': total_checked}
+
+        # Combine unique phones
+        combined_df = pd.concat(output_dfs, ignore_index=True)
+        combined_df = combined_df.drop_duplicates(subset='phone')
+        unique_after_merge = len(combined_df)
+        logger.info(f"Combined unique phones: {unique_after_merge}")
+
+        # Save output file
+        output_filename = f"check_unique_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
+        with ExcelWriter(output_path, engine='openpyxl') as writer:
+            combined_df.to_excel(writer, index=False, sheet_name='Unique_Phones')
+        logger.info(f"Saved check output: {output_filename} with {unique_after_merge} phones")
+
+        return output_filename, 'completed', file_metrics, {'total_checked': total_checked, 'unique_after_merge': unique_after_merge}
+    except Exception as e:
+        logger.error(f"Error checking seller files: {str(e)}")
+        return None, 'failed', [{'unique_count': 0, 'duplicate_count': 0}] * len(file_paths), {'total_checked': 0}
+
 def suppress_leads(input_dfs: List[pd.DataFrame], used_numbers: Set[str], suppression_number: int) -> Tuple[Optional[pd.DataFrame], str, List[Dict[str, int]], Dict[str, int]]:
     try:
         file_metrics = []
@@ -209,15 +505,6 @@ def suppress_leads(input_dfs: List[pd.DataFrame], used_numbers: Set[str], suppre
                 continue
 
             df = df[[phone_col]].copy()
-
-            def clean_phone(phone: str) -> str:
-                if pd.isna(phone):
-                    return ''
-                return re.sub(r'\D', '', str(phone)).strip()
-
-            def is_valid_phone(phone: str) -> bool:
-                return bool(phone and 7 <= len(phone) <= 15)
-
             df['cleaned_phone'] = df[phone_col].apply(clean_phone)
             df['is_valid'] = df['cleaned_phone'].apply(is_valid_phone)
 
@@ -284,13 +571,14 @@ def suppress_leads(input_dfs: List[pd.DataFrame], used_numbers: Set[str], suppre
         logger.error(f"Error in suppression {suppression_number}: {str(e)}")
         return None, 'failed', file_metrics, {'total_checked': total_checked}
 
-def process_suppression_check(file_paths: List[str], suppression_number: int) -> Tuple[Optional[str], str, List[Dict[str, int]], Dict[str, int]]:
+def process_suppression(file_paths: List[str], client_id: int, suppression_number: int) -> Tuple[Optional[str], str, List[Dict[str, int]], Dict[str, int]]:
     try:
         input_dfs = []
         for idx, file_path in enumerate(file_paths):
             try:
                 if file_path.endswith('.csv'):
-                    chunks = pd.read_csv(file_path, chunksize=10000, usecols=lambda x: x.lower() in ['phone', 'mobile'])
+                    chunk_size = 10000
+                    chunks = pd.read_csv(file_path, chunksize=chunk_size, usecols=lambda x: x.lower() in ['phone', 'mobile'])
                     df_chunks = []
                     for chunk in chunks:
                         df_chunks.append(chunk)
@@ -313,8 +601,7 @@ def process_suppression_check(file_paths: List[str], suppression_number: int) ->
             logger.error("No valid files to process")
             return None, 'failed', [{'unique_count': 0, 'duplicate_count': 0}] * len(file_paths), {'total_checked': 0}
 
-        # Suppress without prior numbers (empty used_numbers set)
-        used_numbers = set()
+        used_numbers = get_previous_suppression_numbers(client_id)
         output_df, status, file_metrics, summary_metrics = suppress_leads(input_dfs, used_numbers, suppression_number)
         if output_df is None or output_df.empty:
             logger.error(f"Suppression {suppression_number} failed: No valid output generated")
@@ -326,34 +613,40 @@ def process_suppression_check(file_paths: List[str], suppression_number: int) ->
             return None, 'failed', file_metrics, summary_metrics
 
         max_excel_rows = 1048576
-        output_filename = f"check_suppression_{suppression_number}"
+        output_filename = f"{number_to_ordinal(suppression_number)}_suppression"
         output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
-
-        # Save only unique phones
-        unique_df = output_df[output_df['status'] == 'unique'][['phone']]
-        if unique_df.empty:
-            logger.warning("No unique phones found after suppression")
-            return None, 'completed', file_metrics, summary_metrics
-
-        if len(unique_df) > max_excel_rows:
+        
+        if len(output_df) > max_excel_rows:
             output_filename += '.csv'
             output_path += '.csv'
-            unique_df.to_csv(output_path, index=False)
-            logger.info(f"Saved output as CSV: {output_filename} with {len(unique_df)} rows")
+            output_df.to_csv(output_path, index=False)
+            logger.info(f"Saved output as CSV: {output_filename} with {len(output_df)} rows")
         else:
             output_filename += '.xlsx'
             output_path += '.xlsx'
+            chunk_size = max_excel_rows - 1
             with ExcelWriter(output_path, engine='openpyxl') as writer:
-                unique_df.to_excel(writer, index=False, sheet_name='Unique_Phones')
-            logger.info(f"Saved output as Excel: {output_filename} with {len(unique_df)} rows")
+                for i in range(0, len(output_df), chunk_size):
+                    chunk = output_df[i:i + chunk_size]
+                    sheet_name = f'Suppression_{i // chunk_size + 1}'
+                    chunk.to_excel(writer, index=False, sheet_name=sheet_name)
+                    logger.info(f"Wrote sheet {sheet_name} with {len(chunk)} rows to {output_filename}")
 
         if not os.path.exists(output_path):
             logger.error(f"Suppression {suppression_number} failed: Output file {output_filename} was not created")
             return None, 'failed', file_metrics, summary_metrics
 
+        logger.info(f"Saved output: {output_filename} with {len(output_df)} rows")
+
+        unique_phones = output_df[output_df['status'] == 'unique']['phone'].apply(
+            lambda x: re.sub(r'\D', '', str(x)).strip()
+        ).tolist()
+        if unique_phones:
+            batch_insert_unique_phones(client_id, unique_phones)
+
         return output_filename, status, file_metrics, summary_metrics
     except Exception as e:
-        logger.error(f"Error processing suppression check {suppression_number}: {str(e)}")
+        logger.error(f"Error processing suppression {suppression_number}: {str(e)}")
         return None, 'failed', [{'unique_count': 0, 'duplicate_count': 0}] * len(file_paths), {'total_checked': 0}
 
 def get_suppression_number(client_id: int) -> int:
@@ -462,14 +755,6 @@ def generate_leads(
             return None, 'failed', {'total_phones': 0, 'unique_leads': 0}
 
         # Clean and validate phone numbers
-        def clean_phone(phone: str) -> str:
-            if pd.isna(phone):
-                return ''
-            return re.sub(r'\D', '', str(phone)).strip()
-
-        def is_valid_phone(phone: str) -> bool:
-            return bool(phone and 7 <= len(phone) <= 15)
-
         df['cleaned_phone'] = df[phone_col].apply(clean_phone)
         df['is_valid'] = df['cleaned_phone'].apply(is_valid_phone)
 
@@ -612,84 +897,6 @@ def generate_leads(
         logger.error(f"Error generating leads: {str(e)}")
         return None, 'failed', {'total_phones': 0, 'unique_leads': 0}
 
-def process_suppression(file_paths: List[str], client_id: int, suppression_number: int) -> Tuple[Optional[str], str, List[Dict[str, int]], Dict[str, int]]:
-    try:
-        input_dfs = []
-        for idx, file_path in enumerate(file_paths):
-            try:
-                if file_path.endswith('.csv'):
-                    chunk_size = 10000
-                    chunks = pd.read_csv(file_path, chunksize=chunk_size, usecols=lambda x: x.lower() in ['phone', 'mobile'])
-                    df_chunks = []
-                    for chunk in chunks:
-                        df_chunks.append(chunk)
-                    if df_chunks:
-                        df = pd.concat(df_chunks, ignore_index=True)
-                    else:
-                        df = pd.DataFrame()
-                else:
-                    df = pd.read_excel(file_path, engine='openpyxl', usecols=lambda x: x.lower() in ['phone', 'mobile'])
-                    if df.empty:
-                        df = pd.DataFrame()
-                input_dfs.append(df)
-                logger.info(f"Loaded file {idx + 1}: {file_path} with {len(df)} rows")
-            except Exception as e:
-                logger.warning(f"Skipping file {file_path}: {str(e)}")
-                input_dfs.append(pd.DataFrame())
-                continue
-
-        if not any(not df.empty for df in input_dfs):
-            logger.error("No valid files to process")
-            return None, 'failed', [{'unique_count': 0, 'duplicate_count': 0}] * len(file_paths), {'total_checked': 0}
-
-        used_numbers = get_previous_suppression_numbers(client_id)
-        output_df, status, file_metrics, summary_metrics = suppress_leads(input_dfs, used_numbers, suppression_number)
-        if output_df is None or output_df.empty:
-            logger.error(f"Suppression {suppression_number} failed: No valid output generated")
-            return None, 'failed', file_metrics, summary_metrics
-
-        logger.info(f"Output DataFrame has {len(output_df)} rows and columns: {output_df.columns.tolist()}")
-        if not all(col in output_df.columns for col in ['phone', 'status']):
-            logger.error(f"Suppression {suppression_number} failed: Output DataFrame missing required columns")
-            return None, 'failed', file_metrics, summary_metrics
-
-        max_excel_rows = 1048576
-        output_filename = f"{number_to_ordinal(suppression_number)}_suppression"
-        output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
-        
-        if len(output_df) > max_excel_rows:
-            output_filename += '.csv'
-            output_path += '.csv'
-            output_df.to_csv(output_path, index=False)
-            logger.info(f"Saved output as CSV: {output_filename} with {len(output_df)} rows")
-        else:
-            output_filename += '.xlsx'
-            output_path += '.xlsx'
-            chunk_size = max_excel_rows - 1
-            with ExcelWriter(output_path, engine='openpyxl') as writer:
-                for i in range(0, len(output_df), chunk_size):
-                    chunk = output_df[i:i + chunk_size]
-                    sheet_name = f'Suppression_{i // chunk_size + 1}'
-                    chunk.to_excel(writer, index=False, sheet_name=sheet_name)
-                    logger.info(f"Wrote sheet {sheet_name} with {len(chunk)} rows to {output_filename}")
-
-        if not os.path.exists(output_path):
-            logger.error(f"Suppression {suppression_number} failed: Output file {output_filename} was not created")
-            return None, 'failed', file_metrics, summary_metrics
-
-        logger.info(f"Saved output: {output_filename} with {len(output_df)} rows")
-
-        unique_phones = output_df[output_df['status'] == 'unique']['phone'].apply(
-            lambda x: re.sub(r'\D', '', str(x)).strip()
-        ).tolist()
-        if unique_phones:
-            batch_insert_unique_phones(client_id, unique_phones)
-
-        return output_filename, status, file_metrics, summary_metrics
-    except Exception as e:
-        logger.error(f"Error processing suppression {suppression_number}: {str(e)}")
-        return None, 'failed', [{'unique_count': 0, 'duplicate_count': 0}] * len(file_paths), {'total_checked': 0}
-
 # Routes
 @app.route('/')
 def index():
@@ -830,7 +1037,10 @@ def dashboard():
 def admin_portal():
     users = User.query.all()
     clients = Client.query.all()
-    return render_template('admin.html', users=users, clients=clients, csrf_token=generate_csrf())
+    master_files = MasterFile.query.order_by(MasterFile.upload_date.desc()).all()
+    # Get only the latest master output file
+    latest_master_output = MasterFile.query.filter(MasterFile.master_filename.isnot(None)).order_by(MasterFile.upload_date.desc()).first()
+    return render_template('admin.html', users=users, clients=clients, master_files=master_files, latest_master_output=latest_master_output, csrf_token=generate_csrf())
 
 @app.route('/add_user', methods=['POST'])
 @admin_required
@@ -1117,6 +1327,128 @@ def upload_data():
         db.session.rollback()
         return jsonify({'status': 'error', 'message': f'Error uploading data file: {str(e)}'}), 500
 
+@app.route('/upload_master', methods=['POST'])
+@admin_required
+def upload_master():
+    try:
+        if 'files' not in request.files:
+            return jsonify({'status': 'error', 'message': 'No files uploaded'}), 400
+
+        files = request.files.getlist('files')
+        if not files or all(f.filename == '' for f in files):
+            return jsonify({'status': 'error', 'message': 'No files selected'}), 400
+
+        total_unique = 0
+        errors = []
+        messages = []
+        master_filename = None
+        metrics_list = []
+        processed_files = 0
+        master_phones = None  # Track master phones across files
+
+        # Get the previous master output file
+        latest_master = MasterFile.query.filter(MasterFile.master_filename.isnot(None)).order_by(MasterFile.upload_date.desc()).first()
+        prev_master_path = None
+        if latest_master and latest_master.master_filename:
+            prev_master_path = os.path.join(app.config['UPLOAD_FOLDER'], latest_master.master_filename)
+            if not os.path.exists(prev_master_path):
+                logger.warning(f"Previous master file {latest_master.master_filename} not found")
+                prev_master_path = None
+
+        for file in files:
+            if not (file.filename.endswith('.csv') or file.filename.endswith('.xlsx')):
+                errors.append(f"Invalid file {file.filename}: Only CSV or Excel files are accepted.")
+                continue
+
+            # Save the file
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+            logger.info(f"Uploaded file: {filename}")
+
+            # Process the file, passing master_phones and prev_master_path
+            new_master_filename, status, metrics = process_master_file(filepath, filename, master_phones=master_phones, prev_master_path=prev_master_path)
+
+            if status == 'failed':
+                errors.append(metrics.get('error', f"Failed to process {filename}"))
+                continue
+
+            # Update metrics
+            total_unique += metrics['unique_count']
+            # Create a copy of metrics without non-serializable fields
+            response_metrics = {
+                'filename': filename,
+                'phone_count': metrics['phone_count'],
+                'unique_count': metrics['unique_count'],
+                'duplicate_count': metrics['duplicate_count'],
+                'master_phone_count': metrics['master_phone_count']
+            }
+            if 'message' in metrics:
+                response_metrics['message'] = metrics['message']
+            metrics_list.append(response_metrics)
+            if new_master_filename:
+                master_filename = new_master_filename  # Update master filename
+            if 'new_master_phones' in metrics:
+                master_phones = metrics['new_master_phones']  # Update master phones for next file
+
+            # Log specific message for no new uniques
+            if metrics['unique_count'] == 0:
+                messages.append(metrics.get('message', f"No new unique phones found in {filename}"))
+            else:
+                messages.append(f"Processed {filename}: {metrics['unique_count']} unique phones added")
+
+            # Save to database
+            master_file = MasterFile(
+                filename=filename,
+                upload_date=datetime.datetime.now().isoformat(),
+                phone_count=metrics['unique_count'],
+                master_filename=master_filename if metrics['unique_count'] > 0 else None
+            )
+            db.session.add(master_file)
+            processed_files += 1
+
+        if errors and processed_files == 0:
+            db.session.rollback()
+            return jsonify({'status': 'error', 'message': '; '.join(errors)}), 400
+
+        # If a new master file was created, delete the previous one and update all MasterFile records
+        if master_filename:
+            if latest_master and latest_master.master_filename and os.path.exists(prev_master_path):
+                try:
+                    os.remove(prev_master_path)
+                    logger.info(f"Deleted previous master file: {latest_master.master_filename}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete previous master file {latest_master.master_filename}: {str(e)}")
+
+            # Update all MasterFile records to point to the new master_filename
+            MasterFile.query.filter(MasterFile.master_filename.isnot(None)).update(
+                {MasterFile.master_filename: master_filename},
+                synchronize_session=False
+            )
+            db.session.commit()
+
+        logger.info(f"Successfully processed {processed_files} files")
+
+        # Combine messages for response
+        success_message = f"Processed {processed_files} file(s). {total_unique} unique phones added."
+        if messages:
+            success_message += ' ' + '; '.join(messages)
+        if total_unique == 0 and not errors:
+            success_message += " No new unique phones found across all files."
+
+        return jsonify({
+            'status': 'success',
+            'message': success_message,
+            'metrics': metrics_list
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error in upload_master: {str(e)}")
+        return jsonify({'status': 'error', 'message': f"Error processing files: {str(e)}"}), 500
+
+
+
 @app.route('/generate_leads', methods=['POST'])
 @login_required
 def generate_leads_route():
@@ -1194,72 +1526,250 @@ def check():
 @app.route('/check_suppression', methods=['POST'])
 def check_suppression():
     try:
-        name = request.form.get('name', '').strip()
-        email = request.form.get('email', '').strip()
+        if 'files' not in request.files:
+            return jsonify({'status': 'error', 'message': 'No files uploaded'}), 400
+
         files = request.files.getlist('files')
-
-        if not name or not email:
-            logger.warning("Missing name or email in suppression check")
-            return jsonify({'status': 'error', 'message': 'Name and email are required'}), 400
-
-        if not files:
-            logger.warning("No files provided for suppression check")
+        if not files or all(f.filename == '' for f in files):
             return jsonify({'status': 'error', 'message': 'No files selected'}), 400
 
-        # Validate email format
-        if not re.match(r'[^@]+@[^@]+\.[^@]+', email):
-            logger.warning(f"Invalid email format: {email}")
-            return jsonify({'status': 'error', 'message': 'Invalid email format'}), 400
-
-        # Save files temporarily
+        # Create temporary directory for seller files
         temp_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_check')
         os.makedirs(temp_dir, exist_ok=True)
-        file_paths = []
+
+        # Get the latest master file
+        latest_master = MasterFile.query.filter(MasterFile.master_filename.isnot(None)).order_by(MasterFile.upload_date.desc()).first()
+        master_path = None
+        master_phones = set()
+        if latest_master and latest_master.master_filename:
+            master_path = os.path.join(app.config['UPLOAD_FOLDER'], latest_master.master_filename)
+            if os.path.exists(master_path):
+                try:
+                    if master_path.endswith('.csv'):
+                        master_df = pd.read_csv(master_path, usecols=['phone'], dtype=str)
+                    else:
+                        master_df = pd.read_excel(master_path, engine='openpyxl', usecols=['phone'], dtype=str)
+                    master_df['cleaned_phone'] = master_df['phone'].apply(clean_phone)
+                    master_phones = set(master_df['cleaned_phone'].dropna())
+                    logger.info(f"Loaded master file {latest_master.master_filename} with {len(master_phones)} phones")
+                except Exception as e:
+                    logger.error(f"Error loading master file {latest_master.master_filename}: {str(e)}")
+                    return jsonify({'status': 'error', 'message': f"Error loading master file: {str(e)}"}), 500
+            else:
+                logger.warning(f"Master file {latest_master.master_filename} not found")
+        else:
+            logger.info("No master file available for suppression check")
+
+        total_checked = 0
+        total_unique = 0
+        metrics_list = []
+        valid_files = []
+        temp_files = []
+
+        # Supported phone column names
+        valid_phone_columns = ['phone', 'phone number', 'mobile', 'contact']
+
+        # Process each uploaded file
         for file in files:
-            if not allowed_file(file.filename):
-                logger.warning(f"Invalid file type: {file.filename}")
+            if not (file.filename.endswith('.csv') or file.filename.endswith('.xlsx')):
+                logger.warning(f"Skipping invalid file {file.filename}: Only CSV or Excel files are accepted")
+                metrics_list.append({
+                    'filename': file.filename,
+                    'phone_count': 0,
+                    'unique_count': 0,
+                    'duplicate_count': 0,
+                    'error': 'Only CSV or Excel files are accepted'
+                })
                 continue
-            filename = secure_filename(f"{uuid.uuid4()}_{file.filename}")
-            file_path = os.path.join(temp_dir, filename)
-            file.save(file_path)
-            file_paths.append(file_path)
-            logger.info(f"Saved temporary file: {filename}")
 
-        if not file_paths:
-            logger.error("No valid files uploaded for suppression check")
-            return jsonify({'status': 'error', 'message': 'No valid files uploaded'}), 400
+            # Save temporary file
+            temp_filename = f"temp_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{secure_filename(file.filename)}"
+            temp_filepath = os.path.join(temp_dir, temp_filename)
+            file.save(temp_filepath)
+            temp_files.append(temp_filepath)
+            logger.info(f"Saved temporary file: {temp_filename}")
 
-        # Process suppression (no prior numbers to suppress against)
-        suppression_number = int(datetime.datetime.now().timestamp())
-        output_filename, status, file_metrics, summary_metrics = process_suppression_check(file_paths, suppression_number)
+            # Load seller file
+            try:
+                if temp_filepath.endswith('.csv'):
+                    try:
+                        chunks = pd.read_csv(temp_filepath, chunksize=10000, usecols=lambda x: x.lower() in valid_phone_columns, dtype=str)
+                        df_chunks = []
+                        for chunk in chunks:
+                            df_chunks.append(chunk)
+                        df = pd.concat(df_chunks, ignore_index=True) if df_chunks else pd.DataFrame()
+                    except ValueError:
+                        logger.warning(f"Skipping seller file {temp_filename}: No phone column found (expected: {', '.join(valid_phone_columns)})")
+                        metrics_list.append({
+                            'filename': file.filename,
+                            'phone_count': 0,
+                            'unique_count': 0,
+                            'duplicate_count': 0,
+                            'error': f"File must contain a phone column (e.g., {', '.join(valid_phone_columns)})"
+                        })
+                        continue
+                else:
+                    try:
+                        df = pd.read_excel(temp_filepath, engine='openpyxl', usecols=lambda x: x.lower() in valid_phone_columns, dtype=str)
+                        if df.empty:
+                            df = pd.DataFrame()
+                    except ValueError:
+                        logger.warning(f"Skipping seller file {temp_filename}: No phone column found (expected: {', '.join(valid_phone_columns)})")
+                        metrics_list.append({
+                            'filename': file.filename,
+                            'phone_count': 0,
+                            'unique_count': 0,
+                            'duplicate_count': 0,
+                            'error': f"File must contain a phone column (e.g., {', '.join(valid_phone_columns)})"
+                        })
+                        continue
+
+                # Identify phone column
+                phone_col = None
+                for col in df.columns:
+                    if col.lower() in valid_phone_columns:
+                        phone_col = col
+                        break
+                if not phone_col:
+                    logger.warning(f"Skipping seller file {temp_filename}: No phone column found (expected: {', '.join(valid_phone_columns)})")
+                    metrics_list.append({
+                        'filename': file.filename,
+                        'phone_count': 0,
+                        'unique_count': 0,
+                        'duplicate_count': 0,
+                        'error': f"File must contain a phone column (e.g., {', '.join(valid_phone_columns)})"
+                    })
+                    continue
+
+                # Clean and validate phones
+                df['cleaned_phone'] = df[phone_col].apply(clean_phone)
+                df['is_valid'] = df['cleaned_phone'].apply(is_valid_phone)
+                valid_df = df[df['is_valid']][['cleaned_phone']].copy()
+                total_phones = len(valid_df)
+                if valid_df.empty:
+                    logger.warning(f"No valid phone numbers in {temp_filename}")
+                    metrics_list.append({
+                        'filename': file.filename,
+                        'phone_count': total_phones,
+                        'unique_count': 0,
+                        'duplicate_count': 0,
+                        'error': "No valid phone numbers found"
+                    })
+                    continue
+
+                # Deduplicate within the file
+                valid_df = valid_df.drop_duplicates(subset='cleaned_phone')
+                unique_in_file = len(valid_df)
+
+                # Check against master phones
+                valid_df['is_unique'] = valid_df['cleaned_phone'].apply(lambda x: x not in master_phones)
+                unique_df = valid_df[valid_df['is_unique']][['cleaned_phone']]
+                unique_count = len(unique_df)
+                duplicate_count = unique_in_file - unique_count
+
+                logger.info(f"Processed seller file {file.filename}: {unique_count} unique, {duplicate_count} duplicates")
+                metrics_list.append({
+                    'filename': file.filename,
+                    'phone_count': total_phones,
+                    'unique_count': unique_count,
+                    'duplicate_count': duplicate_count
+                })
+                total_checked += total_phones
+                total_unique += unique_count
+                if not unique_df.empty:
+                    valid_files.append(unique_df)
+
+            except Exception as e:
+                logger.error(f"Error processing seller file {temp_filename}: {str(e)}")
+                metrics_list.append({
+                    'filename': file.filename,
+                    'phone_count': 0,
+                    'unique_count': 0,
+                    'duplicate_count': 0,
+                    'error': f"Error processing file: {str(e)}"
+                })
 
         # Clean up temporary files
-        for file_path in file_paths:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                logger.info(f"Removed temporary file: {file_path}")
+        for temp_filepath in temp_files:
+            try:
+                os.remove(temp_filepath)
+                logger.info(f"Removed temporary file: {temp_filepath}")
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary file {temp_filepath}: {str(e)}")
 
-        if status == 'completed' and output_filename:
-            logger.info(f"Suppression check completed: {output_filename}")
-            return jsonify({
-                'status': 'success',
-                'message': 'Suppression check completed',
-                'output_filename': output_filename,
-                'metrics': file_metrics,
-                'summary_metrics': summary_metrics
-            })
-        else:
-            logger.error("Suppression check failed")
+        # Combine unique phones from all valid files
+        combined_df = pd.concat(valid_files, ignore_index=True) if valid_files else pd.DataFrame()
+        if not combined_df.empty:
+            combined_df = combined_df.drop_duplicates(subset='cleaned_phone')
+            combined_df = combined_df[['cleaned_phone']].rename(columns={'cleaned_phone': 'phone'})
+        unique_after_merge = len(combined_df)
+
+        # Save output file if there are unique phones
+        output_filename = None
+        if unique_after_merge > 0:
+            output_filename = f"unique_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
+            try:
+                combined_df.to_excel(output_path, index=False, sheet_name='UniquePhones', engine='openpyxl')
+                logger.info(f"Saved unique phones to {output_filename} with {unique_after_merge} phones")
+            except Exception as e:
+                logger.error(f"Error saving unique phones to {output_filename}: {str(e)}")
+                return jsonify({
+                    'status': 'error',
+                    'message': f"Error saving unique phones: {str(e)}",
+                    'metrics': metrics_list,
+                    'summary_metrics': {
+                        'total_checked': total_checked,
+                        'unique_after_merge': unique_after_merge
+                    }
+                }), 500
+        elif not valid_files:
+            logger.error("No valid seller files to process")
             return jsonify({
                 'status': 'error',
-                'message': 'Suppression check failed',
-                'metrics': file_metrics,
-                'summary_metrics': summary_metrics
-            }), 500
-    except Exception as e:
-        logger.error(f"Error in check_suppression: {str(e)}")
-        return jsonify({'status': 'error', 'message': f'Error processing files: {str(e)}'}), 500
+                'message': f"No valid files processed. Ensure files contain a phone column (e.g., {', '.join(valid_phone_columns)}) and valid phone numbers.",
+                'metrics': metrics_list,
+                'summary_metrics': {
+                    'total_checked': total_checked,
+                    'unique_after_merge': 0
+                }
+            }), 400
 
+        # Prepare response
+        response = {
+            'status': 'success',
+            'message': f"Processed {len(valid_files)} file(s). Found {unique_after_merge} unique phone(s).",
+            'summary_metrics': {
+                'total_checked': total_checked,
+                'unique_after_merge': unique_after_merge
+            },
+            'metrics': metrics_list,
+            'output_filename': output_filename
+        }
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        logger.error(f"Suppression check failed: {str(e)}")
+        # Clean up any remaining temporary files
+        if 'temp_dir' in locals():
+            for temp_filepath in temp_files:
+                try:
+                    os.remove(temp_filepath)
+                    logger.info(f"Removed temporary file: {temp_filepath}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove temporary file {temp_filepath}: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f"Suppression check failed: {str(e)}",
+            'metrics': metrics_list if 'metrics_list' in locals() else [],
+            'summary_metrics': {
+                'total_checked': total_checked if 'total_checked' in locals() else 0,
+                'unique_after_merge': 0
+            }
+        }), 500
+        
+        
 @app.route('/delete_file/<int:file_id>', methods=['POST'])
 @admin_required
 def delete_file(file_id):
