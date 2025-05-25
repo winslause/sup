@@ -183,24 +183,38 @@ def number_to_ordinal(n: int) -> str:
     return ordinals.get(n, f"{n}th")
 
 def batch_insert_unique_phones(client_id: int, unique_phones: List[str]):
-    batch_size = 10000
+    batch_size = 1000  # Reduced batch size for better performance
     current_time = datetime.datetime.now().isoformat()
     for i in range(0, len(unique_phones), batch_size):
         batch = unique_phones[i:i + batch_size]
-        for phone in batch:
+        # Check for existing phones in batch
+        existing_phones = set(
+            row.phone for row in db.session.execute(
+                db.select(UsedLead.phone).filter(
+                    UsedLead.client_id == client_id,
+                    UsedLead.phone.in_(batch)
+                )
+            ).scalars()
+        )
+        new_leads = [
+            UsedLead(client_id=client_id, phone=phone, added_date=current_time)
+            for phone in batch if phone not in existing_phones
+        ]
+        if new_leads:
+            db.session.bulk_save_objects(new_leads)
             try:
-                lead = UsedLead(client_id=client_id, phone=phone, added_date=current_time)
-                db.session.add(lead)
-            except IntegrityError:
+                db.session.commit()
+                logger.info(f"Inserted batch of {len(new_leads)} phones for client {client_id}")
+            except IntegrityError as e:
+                logger.error(f"Failed to insert batch for client {client_id}: {str(e)}")
                 db.session.rollback()
-                continue
-        db.session.commit()
-        logger.info(f"Inserted batch of {len(batch)} phones for client {client_id}")
-
+                
+                
 def clean_phone(phone: str) -> str:
     if pd.isna(phone):
         return ''
     return re.sub(r'\D', '', str(phone)).strip()
+
 
 def is_valid_phone(phone: str) -> bool:
     return bool(phone and 7 <= len(phone) <= 15)
@@ -582,14 +596,21 @@ def process_suppression(file_paths: List[str], client_id: int, suppression_numbe
                     df_chunks = []
                     for chunk in chunks:
                         df_chunks.append(chunk)
-                    if df_chunks:
-                        df = pd.concat(df_chunks, ignore_index=True)
-                    else:
-                        df = pd.DataFrame()
+                        logger.info(f"Loaded chunk {len(df_chunks)} of {file_path} with {len(chunk)} rows")
+                    df = pd.concat(df_chunks, ignore_index=True) if df_chunks else pd.DataFrame()
                 else:
-                    df = pd.read_excel(file_path, engine='openpyxl', usecols=lambda x: x.lower() in ['phone', 'mobile'])
-                    if df.empty:
-                        df = pd.DataFrame()
+                    chunk_size = 100000  # Larger chunks for Excel to balance performance
+                    engine = 'openpyxl'
+                    excel_file = pd.ExcelFile(file_path, engine=engine)
+                    df_chunks = []
+                    for sheet_name in excel_file.sheet_names:
+                        for chunk in pd.read_excel(
+                            file_path, sheet_name=sheet_name, engine=engine,
+                            usecols=lambda x: x.lower() in ['phone', 'mobile'], chunksize=chunk_size
+                        ):
+                            df_chunks.append(chunk)
+                            logger.info(f"Loaded chunk {len(df_chunks)} of {file_path} (sheet: {sheet_name}) with {len(chunk)} rows")
+                    df = pd.concat(df_chunks, ignore_index=True) if df_chunks else pd.DataFrame()
                 input_dfs.append(df)
                 logger.info(f"Loaded file {idx + 1}: {file_path} with {len(df)} rows")
             except Exception as e:
@@ -615,7 +636,7 @@ def process_suppression(file_paths: List[str], client_id: int, suppression_numbe
         max_excel_rows = 1048576
         output_filename = f"{number_to_ordinal(suppression_number)}_suppression"
         output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
-        
+
         if len(output_df) > max_excel_rows:
             output_filename += '.csv'
             output_path += '.csv'
@@ -624,7 +645,7 @@ def process_suppression(file_paths: List[str], client_id: int, suppression_numbe
         else:
             output_filename += '.xlsx'
             output_path += '.xlsx'
-            chunk_size = max_excel_rows - 1
+            chunk_size = 500000  # Smaller chunks for writing to avoid memory issues
             with ExcelWriter(output_path, engine='openpyxl') as writer:
                 for i in range(0, len(output_df), chunk_size):
                     chunk = output_df[i:i + chunk_size]
