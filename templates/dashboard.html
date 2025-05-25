@@ -466,347 +466,366 @@
         </div>
     </div>
 
-    <script>
-        let filesData = {{ files | tojson }};
-        let leadsFilesData = {{ leads_files | tojson }};
-        let selectedClientId = '';
+   <script>
+    let filesData = {{ files | tojson }};
+    let leadsFilesData = {{ leads_files | tojson }};
+    let selectedClientId = '';
 
-        $(document).ready(function() {
-            if (typeof $ === 'undefined') {
-                console.error('jQuery not loaded');
-                return;
-            }
+    $(document).ready(function() {
+        if (typeof $ === 'undefined') {
+            console.error('jQuery not loaded');
+            return;
+        }
 
-            // Sidebar toggler
-            $('#sidebarToggler').on('click', () => {
-                $('#sidebar').toggleClass('sidebar-hidden sidebar-open');
-            });
+        // Sidebar toggler
+        $('#sidebarToggler').on('click', () => {
+            $('#sidebar').toggleClass('sidebar-hidden sidebar-open');
+        });
 
-            $('#sidebarToggle').on('click', () => {
+        $('#sidebarToggle').on('click', () => {
+            $('#sidebar').addClass('sidebar-hidden').removeClass('sidebar-open');
+        });
+
+        // Close sidebar when clicking outside on mobile
+        $(document).on('click', function(e) {
+            if ($(window).width() < 768 && !$(e.target).closest('#sidebar').length && !$(e.target).closest('#sidebarToggler').length) {
                 $('#sidebar').addClass('sidebar-hidden').removeClass('sidebar-open');
-            });
-
-            // Close sidebar when clicking outside on mobile
-            $(document).on('click', function(e) {
-                if ($(window).width() < 768 && !$(e.target).closest('#sidebar').length && !$(e.target).closest('#sidebarToggler').length) {
-                    $('#sidebar').addClass('sidebar-hidden').removeClass('sidebar-open');
-                }
-            });
-
-            // Client selection from sidebar
-            $('#clientList').on('click', 'li:not(.text-gray-500)', function() {
-                selectedClientId = $(this).data('client-id').toString();
-                $('#uploadBtn').prop('disabled', !selectedClientId);
-                $('#generateLeadsBtn').prop('disabled', !selectedClientId);
-                try {
-                    filterTables(selectedClientId);
-                } catch (e) {
-                    console.error('Error in filterTables:', e);
-                }
-                if ($(window).width() < 768) {
-                    $('#sidebar').addClass('sidebar-hidden').removeClass('sidebar-open');
-                }
-            });
-
-            // Open modals
-            $('#addClientBtn').on('click', () => openModal('addClientModal'));
-            $('#selectClientBtn').on('click', () => openModal('selectClientModal'));
-            $('#uploadBtn').on('click', () => {
-                if (selectedClientId) {
-                    $('#uploadClientId').val(selectedClientId);
-                    openModal('uploadModal');
-                }
-            });
-            $('#uploadDataBtn').on('click', () => openModal('uploadDataModal'));
-            $('#editDataBtn').on('click', () => openModal('editDataModal'));
-            $('#generateLeadsBtn').on('click', () => {
-                if (selectedClientId) {
-                    $('#leadsClientId').val(selectedClientId);
-                    $('#leadsClientSelect').val(selectedClientId);
-                    openModal('leadsModal');
-                }
-            });
-
-            // Confirm client selection from modal
-            $('#confirmClientBtn').on('click', function() {
-                const clientId = $('#clientSelect').val();
-                if (!clientId) {
-                    alert('Please select a client');
-                    return;
-                }
-                selectedClientId = clientId.toString();
-                $('#uploadBtn').prop('disabled', false);
-                $('#generateLeadsBtn').prop('disabled', false);
-                try {
-                    filterTables(selectedClientId);
-                    closeModal('selectClientModal');
-                } catch (e) {
-                    console.error('Error in confirmClientBtn:', e);
-                    alert('Error filtering tables: ' + e.message);
-                }
-            });
-
-            // Add custom filter
-            $('#addCustomFilterBtn').on('click', function() {
-                const newFilter = `
-                    <div class="custom-filter">
-                        <input type="text" name="custom_column" placeholder="Column (e.g., age)" class="p-1.5 border rounded text-sm">
-                        <select name="custom_condition" class="p-1.5 border rounded text-sm">
-                            <option value="==">Equals</option>
-                            <option value=">">Greater Than</option>
-                            <option value="<">Less Than</option>
-                            <option value="contains">Contains</option>
-                        </select>
-                        <input type="text" name="custom_value" placeholder="Value (e.g., 30)" class="p-1.5 border rounded text-sm">
-                        <button type="button" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-sm">Remove</button>
-                    </div>
-                `;
-                $('#custom-filters').append(newFilter);
-            });
-
-            // Handle leads form submission
-            $('#leadsForm').on('submit', function(e) {
-                e.preventDefault();
-                // Collect custom filters
-                const filters = [];
-                $('#custom-filters .custom-filter').each(function() {
-                    const column = $(this).find('[name="custom_column"]').val();
-                    const condition = $(this).find('[name="custom_condition"]').val();
-                    const value = $(this).find('[name="custom_value"]').val();
-                    if (column && condition && value) {
-                        filters.push({ column, condition, value });
-                    }
-                });
-                $('#custom_filters_json').val(JSON.stringify(filters));
-
-                $('#leadsLoading').removeClass('hidden');
-                $('#leadsStatus').text('').removeClass('text-red-600 text-green-600');
-                const formData = new FormData(this);
-                $.ajax({
-                    url: '/generate_leads',
-                    type: 'POST',
-                    data: formData,
-                    processData: false,
-                    contentType: false,
-                    headers: {'X-CSRF-Token': formData.get('csrf_token')},
-                    success: function(response) {
-                        $('#leadsLoading').addClass('hidden');
-                        $('#leadsStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
-                        if (response.status === 'success') {
-                            setTimeout(() => {
-                                window.location.reload();
-                            }, 1000);
-                        }
-                    },
-                    error: function(xhr) {
-                        $('#leadsLoading').addClass('hidden');
-                        $('#leadsStatus').text('Error generating leads').addClass('text-red-600');
-                    }
-                });
-            });
-
-            // Add client form submission
-            $('#addClientForm').on('submit', function(e) {
-                e.preventDefault();
-                const formData = new FormData(this);
-                $.ajax({
-                    url: '/add_client',
-                    type: 'POST',
-                    data: formData,
-                    processData: false,
-                    contentType: false,
-                    headers: {'X-CSRF-Token': formData.get('csrf_token')},
-                    success: function(response) {
-                        $('#addClientStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
-                        if (response.status === 'success') {
-                            setTimeout(() => {
-                                window.location.reload();
-                            }, 1000);
-                        }
-                    },
-                    error: function(xhr) {
-                        $('#addClientStatus').text('Error adding client').addClass('text-red-600');
-                    }
-                });
-            });
-
-            // Upload files form submission (suppression)
-            $('#uploadForm').on('submit', function(e) {
-                e.preventDefault();
-                $('#loading').removeClass('hidden');
-                $('#uploadStatus').text('').removeClass('text-red-600 text-green-600');
-                const formData = new FormData(this);
-                $.ajax({
-                    url: '/upload',
-                    type: 'POST',
-                    data: formData,
-                    processData: false,
-                    contentType: false,
-                    headers: {'X-CSRF-Token': formData.get('csrf_token')},
-                    success: function(response) {
-                        $('#loading').addClass('hidden');
-                        $('#uploadStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
-                        if (response.status === 'success') {
-                            setTimeout(() => {
-                                window.location.reload();
-                            }, 1000);
-                        }
-                    },
-                    error: function(xhr) {
-                        $('#loading').addClass('hidden');
-                        $('#uploadStatus').text('Error uploading files').addClass('text-red-600');
-                    }
-                });
-            });
-
-            $('#uploadDataForm, #editDataForm').on('submit', function(e) {
-                e.preventDefault();
-                const modalId = $(this).attr('id') === 'uploadDataForm' ? 'uploadDataModal' : 'editDataModal';
-                const statusId = modalId === 'uploadDataModal' ? 'uploadDataStatus' : 'editDataStatus';
-                const loadingId = modalId === 'uploadDataModal' ? 'uploadDataLoading' : 'editDataLoading';
-                $(`#${loadingId}`).removeClass('hidden');
-                $(`#${statusId}`).text('').removeClass('text-red-600 text-green-600');
-                const formData = new FormData(this);
-                $.ajax({
-                    url: '/upload_data',
-                    type: 'POST',
-                    data: formData,
-                    processData: false,
-                    contentType: false,
-                    headers: {'X-CSRF-Token': formData.get('csrf_token')},
-                    success: function(response) {
-                        $(`#${loadingId}`).addClass('hidden');
-                        $(`#${statusId}`).text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
-                        if (response.status === 'success') {
-                            setTimeout(() => {
-                                window.location.reload();
-                            }, 1000);
-                        }
-                    },
-                    error: function(xhr) {
-                        $(`#${loadingId}`).addClass('hidden');
-                        let errorMsg = 'Error uploading data file';
-                        try {
-                            const response = JSON.parse(xhr.responseText);
-                            errorMsg = response.message || errorMsg;
-                        } catch (e) {
-                            console.error('Error parsing error response:', e);
-                        }
-                        $(`#${statusId}`).text(errorMsg).addClass('text-red-600');
-                    }
-                });
-            });
-
-            // Initial table population
-            try {
-                filterTables('');
-            } catch (e) {
-                console.error('Initial filterTables error:', e);
             }
         });
 
-        function openModal(modalId) {
-            $(`#${modalId}`).removeClass('hidden').addClass('flex fade-in');
-            $('body').addClass('modal-open');
-        }
-
-        function closeModal(modalId) {
-            $(`#${modalId}`).addClass('hidden').removeClass('flex fade-in');
-            $('body').removeClass('modal-open');
-            const $form = $(`#${modalId} form`);
-            if ($form.length) {
-                $form[0].reset();
+        // Client selection from sidebar
+        $('#clientList').on('click', 'li:not(.text-gray-500)', function() {
+            selectedClientId = $(this).data('client-id').toString();
+            $('#uploadBtn').prop('disabled', !selectedClientId);
+            $('#generateLeadsBtn').prop('disabled', !selectedClientId);
+            try {
+                filterTables(selectedClientId);
+            } catch (e) {
+                console.error('Error in filterTables:', e);
             }
-            $(`#${modalId} p`).text('').removeClass('text-red-600 text-green-600');
-            if (modalId === 'leadsModal') {
-                $('#custom-filters').html(`
-                    <div class="custom-filter">
-                        <input type="text" name="custom_column" placeholder="Column (e.g., age)" class="p-1.5 border rounded text-sm">
-                        <select name="custom_condition" class="p-1.5 border rounded text-sm">
-                            <option value="==">Equals</option>
-                            <option value=">">Greater Than</option>
-                            <option value="<">Less Than</option>
-                            <option value="contains">Contains</option>
-                        </select>
-                        <input type="text" name="custom_value" placeholder="Value (e.g., 30)" class="p-1.5 border rounded text-sm">
-                        <button type="button" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-sm">Remove</button>
-                    </div>
-                `);
-                $('#custom_filters_json').val('');
+            if ($(window).width() < 768) {
+                $('#sidebar').addClass('sidebar-hidden').removeClass('sidebar-open');
             }
-        }
+        });
 
-        function deleteFile(fileId) {
-            if (!confirm('Are you sure you want to delete this file?')) return;
-            $.ajax({
-                url: `/delete_file/${fileId}`,
-                type: 'POST',
-                headers: {'X-CSRF-Token': '{{ csrf_token }}'},
-                success: function(response) {
-                    if (response.status === 'success') {
-                        alert(response.message);
-                        window.location.reload();
-                    } else {
-                        alert(response.message);
-                    }
-                },
-                error: function(xhr) {
-                    alert('Error deleting file');
+        // Open modals
+        $('#addClientBtn').on('click', () => openModal('addClientModal'));
+        $('#selectClientBtn').on('click', () => openModal('selectClientModal'));
+        $('#uploadBtn').on('click', () => {
+            if (selectedClientId) {
+                $('#uploadClientId').val(selectedClientId);
+                openModal('uploadModal');
+            }
+        });
+        $('#uploadDataBtn').on('click', () => openModal('uploadDataModal'));
+        $('#editDataBtn').on('click', () => openModal('editDataModal'));
+        $('#generateLeadsBtn').on('click', () => {
+            if (selectedClientId) {
+                $('#leadsClientId').val(selectedClientId);
+                $('#leadsClientSelect').val(selectedClientId);
+                openModal('leadsModal');
+            }
+        });
+
+        // Confirm client selection from modal
+        $('#confirmClientBtn').on('click', function() {
+            const clientId = $('#clientSelect').val();
+            if (!clientId) {
+                alert('Please select a client');
+                return;
+            }
+            selectedClientId = clientId.toString();
+            $('#uploadBtn').prop('disabled', false);
+            $('#generateLeadsBtn').prop('disabled', false);
+            try {
+                filterTables(selectedClientId);
+                closeModal('selectClientModal');
+            } catch (e) {
+                console.error('Error in confirmClientBtn:', e);
+                alert('Error filtering tables: ' + e.message);
+            }
+        });
+
+        // Add custom filter
+        $('#addCustomFilterBtn').on('click', function() {
+            const newFilter = `
+                <div class="custom-filter">
+                    <input type="text" name="custom_column" placeholder="Column (e.g., age)" class="p-1.5 border rounded text-sm">
+                    <select name="custom_condition" class="p-1.5 border rounded text-sm">
+                        <option value="==">Equals</option>
+                        <option value=">">Greater Than</option>
+                        <option value="<">Less Than</option>
+                        <option value="contains">Contains</option>
+                    </select>
+                    <input type="text" name="custom_value" placeholder="Value (e.g., 30)" class="p-1.5 border rounded text-sm">
+                    <button type="button" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-sm">Remove</button>
+                </div>
+            `;
+            $('#custom-filters').append(newFilter);
+        });
+
+        // Remove custom filter
+        $(document).on('click', '.custom-filter button', function() {
+            $(this).closest('.custom-filter').remove();
+        });
+
+        // Handle leads form submission
+        $('#leadsForm').on('submit', function(e) {
+            e.preventDefault();
+            // Collect custom filters
+            const filters = [];
+            $('#custom-filters .custom-filter').each(function() {
+                const column = $(this).find('[name="custom_column"]').val();
+                const condition = $(this).find('[name="custom_condition"]').val();
+                const value = $(this).find('[name="custom_value"]').val();
+                if (column && condition && value) {
+                    filters.push({ column, condition, value });
                 }
             });
-        }
+            $('#custom_filters_json').val(JSON.stringify(filters));
 
-        function filterTables(clientId) {
-            console.log('Filtering tables for clientId:', clientId);
-            const datasetsBody = $('#datasetsBody');
-            const suppressionsBody = $('#suppressionsBody');
-            const leadsBody = $('#leadsBody');
-            const summarySection = $('#summarySection');
-            datasetsBody.empty();
-            suppressionsBody.empty();
-            leadsBody.empty();
-            summarySection.empty();
-
-            // Populate suppression summary section
-            if (!clientId) {
-                const uniqueClientIds = [...new Set(filesData.map(f => f.client_id))];
-                uniqueClientIds.forEach(cid => {
-                    const latest = filesData.filter(f => f.client_id === cid).reduce((a, b) => a.suppression_number > b.suppression_number ? a : b, {});
-                    if (latest.suppression_number) {
-                        summarySection.append(`
-                            <div class="mb-3" data-client-id="${cid}">
-                                <h3 class="text-sm font-medium mb-1.5">Latest Suppression (#${latest.suppression_number}) for ${latest.client_name}</h3>
-                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                                    <div><strong>Total Phones Checked:</strong> ${latest.total_phones_checked}</div>
-                                    <div><strong>Total Unique Phones Before Merge:</strong> ${latest.unique_phones_before}</div>
-                                    <div><strong>Total Unique Phones After Merge:</strong> ${latest.unique_phones_after}</div>
-                                    <div><strong>Duplicates Removed After Merge:</strong> ${latest.duplicates_removed}</div>
-                                </div>
-                            </div>
-                        `);
+            $('#leadsLoading').removeClass('hidden');
+            $('#leadsStatus').text('').removeClass('text-red-600 text-green-600');
+            const formData = new FormData(this);
+            $.ajax({
+                url: '/generate_leads',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                timeout: 3600000, // 1 hour
+                success: function(response) {
+                    $('#leadsLoading').addClass('hidden');
+                    $('#leadsStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    if (response.status === 'success') {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
                     }
-                });
-                const uniqueLeadsClientIds = [...new Set(leadsFilesData.map(l => l.client_id))];
-                uniqueLeadsClientIds.forEach(cid => {
-                    const latest = leadsFilesData.filter(l => l.client_id === cid).reduce((a, b) => new Date(a.upload_date) > new Date(b.upload_date) ? a : b, {});
-                    summarySection.append(`
-                        <div class="mb-3" data-client-id="${cid}">
-                            <h3 class="text-sm font-medium mb-1.5">Latest Leads for ${latest.client_name} (Suppression #${latest.suppression_number})</h3>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                                <div><strong>Total Phones in Data File:</strong> ${latest.total_phones}</div>
-                                <div><strong>Unique Leads:</strong> ${latest.unique_leads}</div>
-                            </div>
-                        </div>
-                    `);
-                });
-                if (!uniqueClientIds.length && !uniqueLeadsClientIds.length) {
-                    summarySection.append('<p class="text-gray-500 text-sm">No suppressions or leads generated yet.</p>');
+                },
+                error: function(xhr, status, error) {
+                    $('#leadsLoading').addClass('hidden');
+                    let errorMsg = 'Error generating leads. Please try again.';
+                    if (status === 'timeout') {
+                        errorMsg = 'Request timed out. Lead generation may still be processing; check back later.';
+                    }
+                    $('#leadsStatus').text(errorMsg).addClass('text-red-600');
+                    console.error('Leads error:', status, error);
                 }
-            } else {
-                const latest = filesData.filter(f => f.client_id.toString() === clientId).reduce((a, b) => a.suppression_number > b.suppression_number ? a : b, {});
+            });
+        });
+
+        // Add client form submission
+        $('#addClientForm').on('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            $('#addClientLoading').removeClass('hidden');
+            $('#addClientStatus').text('').removeClass('text-red-600 text-green-600');
+            $.ajax({
+                url: '/add_client',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                timeout: 300000, // 5 minutes
+                success: function(response) {
+                    $('#addClientLoading').addClass('hidden');
+                    $('#addClientStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    if (response.status === 'success') {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    $('#addClientLoading').addClass('hidden');
+                    let errorMsg = 'Error adding client. Please try again.';
+                    if (status === 'timeout') {
+                        errorMsg = 'Request timed out. Please try again.';
+                    }
+                    $('#addClientStatus').text(errorMsg).addClass('text-red-600');
+                    console.error('Add client error:', status, error);
+                }
+            });
+        });
+
+        // Upload files form submission (suppression)
+        $('#uploadForm').on('submit', function(e) {
+            e.preventDefault();
+            $('#loading').removeClass('hidden');
+            $('#uploadStatus').text('Processing large files, please wait...').addClass('text-blue-600');
+            const formData = new FormData(this);
+            $.ajax({
+                url: '/upload',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                timeout: 3600000, // 1 hour
+                success: function(response) {
+                    $('#loading').addClass('hidden');
+                    $('#uploadStatus').text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    if (response.status === 'success') {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    $('#loading').addClass('hidden');
+                    let errorMsg = 'Error uploading files. Processing may have completed; please refresh to check.';
+                    if (status === 'timeout') {
+                        errorMsg = 'Request timed out. Suppression may still be processing; please refresh to check.';
+                    }
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        errorMsg = response.message || errorMsg;
+                    } catch (e) {
+                        console.error('Error parsing error response:', e);
+                    }
+                    $('#uploadStatus').text(errorMsg).addClass('text-red-600');
+                    console.error('Upload error:', status, error);
+                }
+            });
+        });
+
+        // Upload/edit data form submission
+        $('#uploadDataForm, #editDataForm').on('submit', function(e) {
+            e.preventDefault();
+            const modalId = $(this).attr('id') === 'uploadDataForm' ? 'uploadDataModal' : 'editDataModal';
+            const statusId = modalId === 'uploadDataModal' ? 'uploadDataStatus' : 'editDataStatus';
+            const loadingId = modalId === 'uploadDataModal' ? 'uploadDataLoading' : 'editDataLoading';
+            $(`#${loadingId}`).removeClass('hidden');
+            $(`#${statusId}`).text('').removeClass('text-red-600 text-green-600');
+            const formData = new FormData(this);
+            $.ajax({
+                url: '/upload_data',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                headers: {'X-CSRF-Token': formData.get('csrf_token')},
+                timeout: 3600000, // 1 hour
+                success: function(response) {
+                    $(`#${loadingId}`).addClass('hidden');
+                    $(`#${statusId}`).text(response.message).addClass(response.status === 'success' ? 'text-green-600' : 'text-red-600');
+                    if (response.status === 'success') {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    $(`#${loadingId}`).addClass('hidden');
+                    let errorMsg = 'Error uploading data file. Processing may have completed; please refresh to check.';
+                    if (status === 'timeout') {
+                        errorMsg = 'Request timed out. Data upload may still be processing; please refresh to check.';
+                    }
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        errorMsg = response.message || errorMsg;
+                    } catch (e) {
+                        console.error('Error parsing error response:', e);
+                    }
+                    $(`#${statusId}`).text(errorMsg).addClass('text-red-600');
+                    console.error('Data upload error:', status, error);
+                }
+            });
+        });
+
+        // Delete file
+        $(document).on('click', '.delete-file-btn', function() {
+            const fileId = $(this).data('file-id');
+            deleteFile(fileId);
+        });
+
+        // Initial table population
+        try {
+            filterTables('');
+        } catch (e) {
+            console.error('Initial filterTables error:', e);
+        }
+    });
+
+    function openModal(modalId) {
+        $(`#${modalId}`).removeClass('hidden').addClass('flex fade-in');
+        $('body').addClass('modal-open');
+    }
+
+    function closeModal(modalId) {
+        $(`#${modalId}`).addClass('hidden').removeClass('flex fade-in');
+        $('body').removeClass('modal-open');
+        const $form = $(`#${modalId} form`);
+        if ($form.length) {
+            $form[0].reset();
+        }
+        $(`#${modalId} p`).text('').removeClass('text-red-600 text-green-600');
+        if (modalId === 'leadsModal') {
+            $('#custom-filters').html(`
+                <div class="custom-filter">
+                    <input type="text" name="custom_column" placeholder="Column (e.g., age)" class="p-1.5 border rounded text-sm">
+                    <select name="custom_condition" class="p-1.5 border rounded text-sm">
+                        <option value="==">Equals</option>
+                        <option value=">">Greater Than</option>
+                        <option value="<">Less Than</option>
+                        <option value="contains">Contains</option>
+                    </select>
+                    <input type="text" name="custom_value" placeholder="Value (e.g., 30)" class="p-1.5 border rounded text-sm">
+                    <button type="button" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-sm">Remove</button>
+                </div>
+            `);
+            $('#custom_filters_json').val('');
+        }
+    }
+
+    function deleteFile(fileId) {
+        if (!confirm('Are you sure you want to delete this file?')) return;
+        $.ajax({
+            url: `/delete_file/${fileId}`,
+            type: 'POST',
+            headers: {'X-CSRF-Token': '{{ csrf_token }}'},
+            timeout: 300000, // 5 minutes
+            success: function(response) {
+                if (response.status === 'success') {
+                    alert(response.message);
+                    window.location.reload();
+                } else {
+                    alert(response.message);
+                }
+            },
+            error: function(xhr, status, error) {
+                let errorMsg = 'Error deleting file. Please try again.';
+                if (status === 'timeout') {
+                    errorMsg = 'Request timed out. Please try again.';
+                }
+                alert(errorMsg);
+                console.error('Delete file error:', status, error);
+            }
+        });
+    }
+
+    function filterTables(clientId) {
+        console.log('Filtering tables for clientId:', clientId);
+        const datasetsBody = $('#datasetsBody');
+        const suppressionsBody = $('#suppressionsBody');
+        const leadsBody = $('#leadsBody');
+        const summarySection = $('#summarySection');
+        datasetsBody.empty();
+        suppressionsBody.empty();
+        leadsBody.empty();
+        summarySection.empty();
+
+        // Populate suppression summary section
+        if (!clientId) {
+            const uniqueClientIds = [...new Set(filesData.map(f => f.client_id))];
+            uniqueClientIds.forEach(cid => {
+                const latest = filesData.filter(f => f.client_id === cid).reduce((a, b) => a.suppression_number > b.suppression_number ? a : b, {});
                 if (latest.suppression_number) {
                     summarySection.append(`
-                        <div class="mb-3" data-client-id="${clientId}">
+                        <div class="mb-3" data-client-id="${cid}">
                             <h3 class="text-sm font-medium mb-1.5">Latest Suppression (#${latest.suppression_number}) for ${latest.client_name}</h3>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                                 <div><strong>Total Phones Checked:</strong> ${latest.total_phones_checked}</div>
@@ -817,82 +836,114 @@
                         </div>
                     `);
                 }
-                const latestLeads = leadsFilesData.filter(l => l.client_id.toString() === clientId).reduce((a, b) => new Date(a.upload_date) > new Date(b.upload_date) ? a : b, {upload_date: null});
-                if (latestLeads.upload_date) {
-                    summarySection.append(`
-                        <div class="mb-3" data-client-id="${clientId}">
-                            <h3 class="text-sm font-medium mb-1.5">Latest Leads for ${latestLeads.client_name} (Suppression #${latestLeads.suppression_number})</h3>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                                <div><strong>Total Phones in Data File:</strong> ${latestLeads.total_phones}</div>
-                                <div><strong>Unique Leads:</strong> ${latestLeads.unique_leads}</div>
-                            </div>
+            });
+            const uniqueLeadsClientIds = [...new Set(leadsFilesData.map(l => l.client_id))];
+            uniqueLeadsClientIds.forEach(cid => {
+                const latest = leadsFilesData.filter(l => l.client_id === cid).reduce((a, b) => new Date(a.upload_date) > new Date(b.upload_date) ? a : b, {});
+                summarySection.append(`
+                    <div class="mb-3" data-client-id="${cid}">
+                        <h3 class="text-sm font-medium mb-1.5">Latest Leads for ${latest.client_name} (Suppression #${latest.suppression_number})</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                            <div><strong>Total Phones in Data File:</strong> ${latest.total_phones}</div>
+                            <div><strong>Unique Leads:</strong> ${latest.unique_leads}</div>
                         </div>
-                    `);
-                }
-                if (!latest.suppression_number && !latestLeads.upload_date) {
-                    summarySection.append('<p class="text-gray-500 text-sm">No suppressions or leads generated yet.</p>');
-                }
+                    </div>
+                `);
+            });
+            if (!uniqueClientIds.length && !uniqueLeadsClientIds.length) {
+                summarySection.append('<p class="text-gray-500 text-sm">No suppressions or leads generated yet.</p>');
             }
+        } else {
+            const latest = filesData.filter(f => f.client_id.toString() === clientId).reduce((a, b) => a.suppression_number > b.suppression_number ? a : b, {});
+            if (latest.suppression_number) {
+                summarySection.append(`
+                    <div class="mb-3" data-client-id="${clientId}">
+                        <h3 class="text-sm font-medium mb-1.5">Latest Suppression (#${latest.suppression_number}) for ${latest.client_name}</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                            <div><strong>Total Phones Checked:</strong> ${latest.total_phones_checked}</div>
+                            <div><strong>Total Unique Phones Before Merge:</strong> ${latest.unique_phones_before}</div>
+                            <div><strong>Total Unique Phones After Merge:</strong> ${latest.unique_phones_after}</div>
+                            <div><strong>Duplicates Removed After Merge:</strong> ${latest.duplicates_removed}</div>
+                        </div>
+                    </div>
+                `);
+            }
+            const latestLeads = leadsFilesData.filter(l => l.client_id.toString() === clientId).reduce((a, b) => new Date(a.upload_date) > new Date(b.upload_date) ? a : b, {upload_date: null});
+            if (latestLeads.upload_date) {
+                summarySection.append(`
+                    <div class="mb-3" data-client-id="${clientId}">
+                        <h3 class="text-sm font-medium mb-1.5">Latest Leads for ${latestLeads.client_name} (Suppression #${latestLeads.suppression_number})</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                            <div><strong>Total Phones in Data File:</strong> ${latestLeads.total_phones}</div>
+                            <div><strong>Unique Leads:</strong> ${latestLeads.unique_leads}</div>
+                        </div>
+                    </div>
+                `);
+            }
+            if (!latest.suppression_number && !latestLeads.upload_date) {
+                summarySection.append('<p class="text-gray-500 text-sm">No suppressions or leads generated yet.</p>');
+            }
+        }
 
-            // Populate datasets and suppressions tables
-            filesData.forEach(file => {
-                if (!clientId || file.client_id.toString() === clientId) {
-                    datasetsBody.append(`
-                        <tr>
-                            <td class="p-1.5">${file.filename}</td>
-                            <td class="p-1.5">${new Date(file.upload_date).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}</td>
-                            <td class="p-1.5">${file.client_name}</td>
-                            <td class="p-1.5 text-green-600">${file.unique_count}</td>
-                            <td class="p-1.5 text-red-600">${file.duplicate_count}</td>
-                            <td class="p-1.5">
-                                <button onclick="deleteFile(${file.id})" class="text-red-500 hover:text-red-700" title="Delete File">
-                                    <i class="fas fa-trash"></i>
-                                </button>
-                            </td>
-                        </tr>
-                    `);
+        // Populate datasets and suppressions tables
+        filesData.forEach(file => {
+            if (!clientId || file.client_id.toString() === clientId) {
+                datasetsBody.append(`
+                    <tr>
+                        <td class="p-1.5">${file.filename}</td>
+                        <td class="p-1.5">${new Date(file.upload_date).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                        <td class="p-1.5">${file.client_name}</td>
+                        <td class="p-1.5 text-green-600">${file.unique_count}</td>
+                        <td class="p-1.5 text-red-600">${file.duplicate_count}</td>
+                        <td class="p-1.5">
+                            <button onclick="deleteFile(${file.id})" class="text-red-500 hover:text-red-700 delete-file-btn" data-file-id="${file.id}" title="Delete File">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `);
 
-                    if (file.output_filename) {
-                        const existing = suppressionsBody.find(`tr[data-suppression="${file.suppression_number}"]`);
-                        if (!existing.length) {
-                            suppressionsBody.append(`
-                                <tr data-suppression="${file.suppression_number}">
-                                    <td class="p-1.5">${file.suppression_number}</td>
-                                    <td class="p-1.5">${file.output_filename}</td>
-                                    <td class="p-1.5">${file.status}</td>
-                                    <td class="p-1.5">${file.client_name}</td>
-                                    <td class="p-1.5">
-                                        <a href="/download/${file.output_filename}" class="text-blue-500 hover:underline">Download</a>
-                                    </td>
-                                </tr>
-                            `);
-                        }
+                if (file.output_filename) {
+                    const existing = suppressionsBody.find(`tr[data-suppression="${file.suppression_number}"]`);
+                    if (!existing.length) {
+                        suppressionsBody.append(`
+                            <tr data-suppression="${file.suppression_number}">
+                                <td class="p-1.5">${file.suppression_number}</td>
+                                <td class="p-1.5">${file.output_filename}</td>
+                                <td class="p-1.5">${file.status}</td>
+                                <td class="p-1.5">${file.client_name}</td>
+                                <td class="p-1.5">
+                                    <a href="/download/${file.output_filename}" class="text-blue-500 hover:underline">Download</a>
+                                </td>
+                            </tr>
+                        `);
                     }
                 }
-            });
+            }
+        });
 
-            // Populate leads table
-            leadsFilesData.forEach(lead => {
-                if (!clientId || lead.client_id.toString() === clientId) {
-                    leadsBody.append(`
-                        <tr>
-                            <td class="p-1.5">${lead.data_filename}</td>
-                            <td class="p-1.5">${lead.output_filename || 'No leads found'}</td>
-                            <td class="p-1.5">${lead.client_name}</td>
-                            <td class="p-1.5">${new Date(lead.upload_date).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}</td>
-                            <td class="p-1.5">${lead.revenue_filter || 'None'}</td>
-                            <td class="p-1.5">${lead.number_type_filter || 'None'}</td>
-                            <td class="p-1.5">${lead.email_filter ? 'Yes' : 'No'}</td>
-                            <td class="p-1.5">${lead.lead_quantity || 'All'}</td>
-                            <td class="p-1.5">${lead.custom_filters || 'None'}</td>
-                            <td class="p-1.5">
-                                ${lead.output_filename ? `<a href="/download/${lead.output_filename}" class="text-blue-500 hover:underline">Download</a>` : 'N/A'}
-                            </td>
-                        </tr>
-                    `);
-                }
-            });
-        }
-    </script>
+        // Populate leads table
+        leadsFilesData.forEach(lead => {
+            if (!clientId || lead.client_id.toString() === clientId) {
+                leadsBody.append(`
+                    <tr>
+                        <td class="p-1.5">${lead.data_filename}</td>
+                        <td class="p-1.5">${lead.output_filename || 'No leads found'}</td>
+                        <td class="p-1.5">${lead.client_name}</td>
+                        <td class="p-1.5">${new Date(lead.upload_date).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                        <td class="p-1.5">${lead.revenue_filter || 'None'}</td>
+                        <td class="p-1.5">${lead.number_type_filter || 'None'}</td>
+                        <td class="p-1.5">${lead.email_filter ? 'Yes' : 'No'}</td>
+                        <td class="p-1.5">${lead.lead_quantity || 'All'}</td>
+                        <td class="p-1.5">${lead.custom_filters || 'None'}</td>
+                        <td class="p-1.5">
+                            ${lead.output_filename ? `<a href="/download/${lead.output_filename}" class="text-blue-500 hover:underline">Download</a>` : 'N/A'}
+                        </td>
+                    </tr>
+                `);
+            }
+        });
+    }
+</script>
 </body>
 </html>

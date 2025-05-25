@@ -1266,72 +1266,105 @@ def delete_client(client_id):
 @app.route('/upload', methods=['POST'])
 @login_required
 def upload():
-    client_id = request.form.get('client_id')
-    if not client_id:
-        return jsonify({'status': 'error', 'message': 'Client ID is required'}), 400
+    try:
+        client_id = request.form.get('client_id')
+        if not client_id:
+            logger.error("Upload failed: Client ID missing")
+            return jsonify({'status': 'error', 'message': 'Client ID is required'}), 400
 
-    client = Client.query.get(client_id)
-    if not client:
-        return jsonify({'status': 'error', 'message': 'Client not found'}), 404
+        client = Client.query.get(client_id)
+        if not client:
+            logger.error(f"Upload failed: Client ID {client_id} not found")
+            return jsonify({'status': 'error', 'message': 'Client not found'}), 404
 
-    files = request.files.getlist('files')
-    if not files:
-        return jsonify({'status': 'error', 'message': 'No files selected'}), 400
+        files = request.files.getlist('files')
+        if not files:
+            logger.error("Upload failed: No files selected")
+            return jsonify({'status': 'error', 'message': 'No files selected'}), 400
 
-    suppression_number = get_suppression_number(int(client_id))
-    file_paths = []
-    filenames = []
+        suppression_number = get_suppression_number(int(client_id))
+        file_paths = []
+        filenames = []
 
-    for file in files:
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
-            file_paths.append(file_path)
-            filenames.append(filename)
-            logger.info(f"Uploaded file: {filename}")
+        for file in files:
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+                file_paths.append(file_path)
+                filenames.append(filename)
+                logger.info(f"Uploaded file: {filename}")
+            else:
+                logger.warning(f"Skipping file {file.filename}: Invalid file type")
+
+        if not file_paths:
+            logger.error("Upload failed: No valid files uploaded")
+            return jsonify({'status': 'error', 'message': 'No valid files uploaded'}), 400
+
+        try:
+            output_filename, status, file_metrics, summary_metrics = process_suppression(file_paths, int(client_id), suppression_number)
+        except Exception as e:
+            logger.error(f"process_suppression failed for client {client_id}: {str(e)}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Processing error: {str(e)}. Check server logs.',
+                'metrics': [],
+                'summary_metrics': {}
+            }), 500
+
+        if status == 'completed' and output_filename:
+            try:
+                for filename in filenames:
+                    new_file = File(
+                        client_id=client_id,
+                        filename=filename,
+                        output_filename=output_filename,
+                        upload_date=datetime.datetime.now().isoformat(),
+                        status=status,
+                        suppression_number=suppression_number,
+                        unique_count=file_metrics[0]['unique_count'] if file_metrics else 0,
+                        duplicate_count=file_metrics[0]['duplicate_count'] if file_metrics else 0,
+                        total_checked=summary_metrics.get('total_checked', 0),
+                        unique_before_merge=summary_metrics.get('unique_before_merge', 0),
+                        unique_after_merge=summary_metrics.get('unique_after_merge', 0),
+                        duplicates_removed=summary_metrics.get('duplicates_removed', 0)
+                    )
+                    db.session.add(new_file)
+                db.session.commit()
+                logger.info(f"Stored {len(filenames)} files in database for suppression {suppression_number} for client {client_id}")
+            except Exception as e:
+                logger.error(f"Database commit failed for suppression {suppression_number}: {str(e)}")
+                db.session.rollback()
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Database error: {str(e)}. Files may have been processed.',
+                    'metrics': file_metrics,
+                    'summary_metrics': summary_metrics
+                }), 500
+
+            return jsonify({
+                'status': 'success',
+                'message': 'Processing completed',
+                'output_filename': output_filename,
+                'metrics': file_metrics,
+                'summary_metrics': summary_metrics
+            })
         else:
-            logger.warning(f"Skipping file {file.filename}: Invalid file type")
-            continue
+            logger.error(f"Suppression {suppression_number} failed: {summary_metrics.get('error', 'Unknown error')}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Processing failed: {summary_metrics.get("error", "Unable to save output file")}',
+                'metrics': file_metrics,
+                'summary_metrics': summary_metrics
+            }), 500
 
-    if not file_paths:
-        return jsonify({'status': 'error', 'message': 'No valid files uploaded'}), 400
-
-    output_filename, status, file_metrics, summary_metrics = process_suppression(file_paths, int(client_id), suppression_number)
-
-    if status == 'completed' and output_filename:
-        for filename in filenames:
-            new_file = File(
-                client_id=client_id,
-                filename=filename,
-                output_filename=output_filename,
-                upload_date=datetime.datetime.now().isoformat(),
-                status=status,
-                suppression_number=suppression_number,
-                unique_count=file_metrics[0]['unique_count'] if file_metrics else 0,
-                duplicate_count=file_metrics[0]['duplicate_count'] if file_metrics else 0,
-                total_checked=summary_metrics.get('total_checked', 0),
-                unique_before_merge=summary_metrics.get('unique_before_merge', 0),
-                unique_after_merge=summary_metrics.get('unique_after_merge', 0),
-                duplicates_removed=summary_metrics.get('duplicates_removed', 0)
-            )
-            db.session.add(new_file)
-        db.session.commit()
-        logger.info(f"Stored {len(filenames)} files in database for suppression {suppression_number} for client {client_id}")
-
-        return jsonify({
-            'status': 'success',
-            'message': 'Processing completed',
-            'output_filename': output_filename,
-            'metrics': file_metrics,
-            'summary_metrics': summary_metrics
-        })
-    else:
+    except Exception as e:
+        logger.error(f"Unexpected error in upload route: {str(e)}")
         return jsonify({
             'status': 'error',
-            'message': f'Processing failed: {summary_metrics.get("error", "Unable to save output file")}',
-            'metrics': file_metrics,
-            'summary_metrics': summary_metrics
+            'message': 'Server error occurred. Please try again.',
+            'metrics': [],
+            'summary_metrics': {}
         }), 500
 
 @app.route('/upload_data', methods=['POST'])
