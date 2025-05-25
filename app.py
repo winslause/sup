@@ -183,13 +183,16 @@ def number_to_ordinal(n: int) -> str:
     return ordinals.get(n, f"{n}th")
 
 def batch_insert_unique_phones(client_id: int, unique_phones: List[str]):
-    batch_size = 1000  # Reduced batch size for better performance
+    batch_size = 1000
     current_time = datetime.datetime.now().isoformat()
     for i in range(0, len(unique_phones), batch_size):
         batch = unique_phones[i:i + batch_size]
-        # Check for existing phones in batch
+        # Ensure batch contains strings
+        batch = [str(phone).strip() for phone in batch if str(phone).strip()]
+        if not batch:
+            continue
         existing_phones = set(
-            row.phone for row in db.session.execute(
+            row for row in db.session.execute(
                 db.select(UsedLead.phone).filter(
                     UsedLead.client_id == client_id,
                     UsedLead.phone.in_(batch)
