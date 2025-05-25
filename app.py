@@ -4,12 +4,14 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
+from sqlalchemy import insert
 import os
 import pandas as pd
 from werkzeug.utils import secure_filename
 import datetime
 import logging
 import re
+from sqlalchemy.exc import DatabaseError
 import json
 import bcrypt
 from typing import Tuple, Optional, Set, Dict, List
@@ -123,15 +125,16 @@ class DataFile(db.Model):
     
     
 # Initialize database
+from sqlalchemy import Index
+
 def init_db():
     with app.app_context():
         db.create_all()
-        # Create index for used_leads
         try:
-            db.engine.execute('CREATE INDEX IF NOT EXISTS idx_used_leads_phone ON used_leads (client_id, phone)')
+            # Create index using SQLAlchemy schema
+            Index('idx_used_leads_phone', UsedLead.client_id, UsedLead.phone).create(bind=db.engine, checkfirst=True)
         except Exception as e:
-            logger.warning(f"Index creation skipped: {str(e)}")
-        # Insert default admin user if none exists
+            logger.warning(f"Index creation failed: {str(e)}")
         if not User.query.filter_by(role='admin').first():
             default_password = bcrypt.hashpw('admin123'.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
             admin = User(
@@ -183,35 +186,53 @@ def number_to_ordinal(n: int) -> str:
     return ordinals.get(n, f"{n}th")
 
 def batch_insert_unique_phones(client_id: int, unique_phones: List[str]):
-    batch_size = 1000
+    batch_size = 500  # Smaller batch for SQLite
     current_time = datetime.datetime.now().isoformat()
-    for i in range(0, len(unique_phones), batch_size):
-        batch = unique_phones[i:i + batch_size]
-        # Ensure batch contains strings
-        batch = [str(phone).strip() for phone in batch if str(phone).strip()]
-        if not batch:
-            continue
-        existing_phones = set(
-            row for row in db.session.execute(
-                db.select(UsedLead.phone).filter(
-                    UsedLead.client_id == client_id,
-                    UsedLead.phone.in_(batch)
-                )
-            ).scalars()
-        )
-        new_leads = [
-            UsedLead(client_id=client_id, phone=phone, added_date=current_time)
-            for phone in batch if phone not in existing_phones
-        ]
-        if new_leads:
-            db.session.bulk_save_objects(new_leads)
-            try:
-                db.session.commit()
-                logger.info(f"Inserted batch of {len(new_leads)} phones for client {client_id}")
-            except IntegrityError as e:
-                logger.error(f"Failed to insert batch for client {client_id}: {str(e)}")
-                db.session.rollback()
-                
+    unique_phones = [str(phone).strip() for phone in unique_phones if str(phone).strip()]
+    total_inserted = 0
+
+    try:
+        for i in range(0, len(unique_phones), batch_size):
+            batch = unique_phones[i:i + batch_size]
+            if not batch:
+                continue
+
+            # Check existing phones in one query
+            existing_phones = set(
+                row[0] for row in db.session.execute(
+                    db.select(UsedLead.phone).filter(
+                        UsedLead.client_id == client_id,
+                        UsedLead.phone.in_(batch)
+                    )
+                ).all()
+            )
+
+            # Prepare new leads for direct SQL insert
+            new_leads = [
+                {"client_id": client_id, "phone": phone, "added_date": current_time}
+                for phone in batch if phone not in existing_phones
+            ]
+
+            if new_leads:
+                try:
+                    db.session.execute(
+                        insert(UsedLead),
+                        new_leads
+                    )
+                    db.session.commit()
+                    total_inserted += len(new_leads)
+                    logger.info(f"Inserted batch of {len(new_leads)} phones for client {client_id}")
+                except IntegrityError as e:
+                    logger.error(f"Integrity error in batch insert for client {client_id}: {str(e)}")
+                    db.session.rollback()
+                except DatabaseError as e:
+                    logger.error(f"Database error in batch insert for client {client_id}: {str(e)}")
+                    db.session.rollback()
+    except Exception as e:
+        logger.error(f"Failed to insert phones for client {client_id}: {str(e)}")
+        db.session.rollback()
+    finally:
+        logger.info(f"Total inserted phones for client {client_id}: {total_inserted}")
                 
 def clean_phone(phone: str) -> str:
     if pd.isna(phone):
