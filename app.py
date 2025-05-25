@@ -598,19 +598,19 @@ def process_suppression(file_paths: List[str], client_id: int, suppression_numbe
                         df_chunks.append(chunk)
                         logger.info(f"Loaded chunk {len(df_chunks)} of {file_path} with {len(chunk)} rows")
                     df = pd.concat(df_chunks, ignore_index=True) if df_chunks else pd.DataFrame()
-                else:
-                    chunk_size = 100000  # Larger chunks for Excel to balance performance
+                else:  # Excel file
                     engine = 'openpyxl'
                     excel_file = pd.ExcelFile(file_path, engine=engine)
-                    df_chunks = []
+                    df_sheets = []
                     for sheet_name in excel_file.sheet_names:
-                        for chunk in pd.read_excel(
+                        # Load entire sheet at once
+                        df = pd.read_excel(
                             file_path, sheet_name=sheet_name, engine=engine,
-                            usecols=lambda x: x.lower() in ['phone', 'mobile'], chunksize=chunk_size
-                        ):
-                            df_chunks.append(chunk)
-                            logger.info(f"Loaded chunk {len(df_chunks)} of {file_path} (sheet: {sheet_name}) with {len(chunk)} rows")
-                    df = pd.concat(df_chunks, ignore_index=True) if df_chunks else pd.DataFrame()
+                            usecols=lambda x: x.lower() in ['phone', 'mobile'], dtype=str
+                        )
+                        df_sheets.append(df)
+                        logger.info(f"Loaded sheet {sheet_name} of {file_path} with {len(df)} rows")
+                    df = pd.concat(df_sheets, ignore_index=True) if df_sheets else pd.DataFrame()
                 input_dfs.append(df)
                 logger.info(f"Loaded file {idx + 1}: {file_path} with {len(df)} rows")
             except Exception as e:
